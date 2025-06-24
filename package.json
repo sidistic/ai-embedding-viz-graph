@@ -1,24 +1,45 @@
 {
-  "name": "ai-emmbedding-viz-graph",
+  "name": "data-viz-graph",
   "version": "0.1.0",
   "private": true,
+  "description": "Data visualization and graph analysis tool for exploring text datasets with AI embeddings",
   "scripts": {
-    "dev": "next dev --turbopack",
+    "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "next": "^15.3.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "next": "15.3.4"
+    "openai": "^5.6.0",
+    "d3": "^7.8.5",
+    "papaparse": "^5.4.1",
+    "lodash": "^4.17.21"
   },
   "devDependencies": {
-    "typescript": "^5",
+    "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@tailwindcss/postcss": "^4",
-    "tailwindcss": "^4"
-  }
+    "@types/d3": "^7.4.3",
+    "@types/papaparse": "^5.3.14",
+    "@types/lodash": "^4.14.202",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  },
+  "keywords": [
+    "data-visualization",
+    "graph-analysis",
+    "embeddings",
+    "ai",
+    "machine-learning",
+    "d3js",
+    "openai",
+    "nextjs"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
 }
