@@ -166,51 +166,91 @@ export default function GraphVisualization({
 
     nodes.call(drag);
 
-    // Node click handler
+    // Node click handler - PROPERLY handles simulation during zoom
     function handleNodeClick(event: MouseEvent, d: GraphNode) {
       event.stopPropagation();
       onNodeClick(d);
-      centerOnNode(d);
+      
+      // Center on node with proper simulation handling
+      if (d.x && d.y && !isNaN(d.x) && !isNaN(d.y)) {
+        // Store current alpha and stop simulation temporarily
+        const currentAlpha = simulation.alpha();
+        simulation.stop();
+        
+        const scale = 1.5;
+        const transform = d3.zoomIdentity
+          .translate(width / 2 - d.x * scale, height / 2 - d.y * scale)
+          .scale(scale);
+
+        // Apply zoom transform
+        svg.transition()
+          .duration(750)
+          .call(zoom.transform, transform)
+          .on('end', () => {
+            // Restart simulation gently after zoom completes
+            simulation.alpha(Math.min(currentAlpha, 0.1)).restart();
+          });
+      }
     }
 
-    // Node hover handlers - only for visual feedback, no reading
+    // Node hover handlers - only for visual feedback during hover
     function handleNodeMouseOver(event: MouseEvent, d: GraphNode) {
-      // Enlarge node
-      d3.select(event.currentTarget as SVGCircleElement)
-        .transition()
-        .duration(200)
-        .attr('r', (d.size || 8) * 1.3)
-        .attr('stroke-width', 3);
+      // Only apply hover effects if this node is not currently selected
+      if (d.id !== selectedNodeId) {
+        // Enlarge node
+        d3.select(event.currentTarget as SVGCircleElement)
+          .transition()
+          .duration(200)
+          .attr('r', (d.size || 8) * 1.3)
+          .attr('stroke-width', 3);
 
-      // Highlight connected nodes and links
-      highlightConnections(d);
-      
-      // Don't call onNodeHover for reading - only for visual feedback
+        // Highlight connections during hover (only if no node is selected)
+        if (!selectedNodeId) {
+          highlightConnections(d, '#fbbf24', true);
+        }
+      }
     }
 
     function handleNodeMouseOut(event: MouseEvent, d: GraphNode) {
-      // Reset node size
-      d3.select(event.currentTarget as SVGCircleElement)
-        .transition()
-        .duration(200)
-        .attr('r', d.size || 8)
-        .attr('stroke-width', 2);
+      // Only reset hover effects if this node is not currently selected
+      if (d.id !== selectedNodeId) {
+        // Reset node size
+        d3.select(event.currentTarget as SVGCircleElement)
+          .transition()
+          .duration(200)
+          .attr('r', d.size || 8)
+          .attr('stroke-width', 2);
 
-      // Reset all highlights
-      resetHighlights();
-      
-      // Don't call onNodeHover(null)
+        // Reset highlights only if no node is selected
+        if (!selectedNodeId) {
+          resetHighlights();
+        }
+      }
     }
 
-    // Highlight connections function
-    function highlightConnections(node: GraphNode) {
+    // Enhanced highlight connections function
+    function highlightConnections(node: GraphNode, highlightColor: string = '#fbbf24', isHover: boolean = false) {
       const connectedIds = new Set<string>();
-      const connectedLinks = new Set<GraphLink>();
 
+      // Helper function to get ID from link source/target (handles both string IDs and node objects)
+      const getLinkId = (sourceOrTarget: any): string => {
+        return typeof sourceOrTarget === 'string' ? sourceOrTarget : sourceOrTarget.id;
+      };
+
+      // Find connected links and IDs
+      const isConnectedLink = (link: any) => {
+        const sourceId = getLinkId(link.source);
+        const targetId = getLinkId(link.target);
+        return sourceId === node.id || targetId === node.id;
+      };
+
+      // Build set of connected node IDs
       graphData.links.forEach(link => {
-        if (link.source === node.id || link.target === node.id) {
-          connectedLinks.add(link);
-          connectedIds.add(link.source === node.id ? link.target : link.source);
+        const sourceId = getLinkId(link.source);
+        const targetId = getLinkId(link.target);
+        
+        if (sourceId === node.id || targetId === node.id) {
+          connectedIds.add(sourceId === node.id ? targetId : sourceId);
         }
       });
 
@@ -219,12 +259,12 @@ export default function GraphVisualization({
         n.id === node.id || connectedIds.has(n.id) ? 1 : 0.3
       );
 
-      // Highlight connected links
+      // Highlight connected links with bright color
       links
-        .style('opacity', l => connectedLinks.has(l) ? 1 : 0.1)
-        .attr('stroke', l => connectedLinks.has(l) ? '#fbbf24' : '#64748b')
+        .style('opacity', l => isConnectedLink(l) ? 1 : 0.1)
+        .attr('stroke', l => isConnectedLink(l) ? highlightColor : '#64748b')
         .attr('stroke-width', l => 
-          connectedLinks.has(l) ? Math.sqrt(l.similarity * 5) + 2 : Math.sqrt(l.similarity * 3) + 1
+          isConnectedLink(l) ? Math.sqrt(l.similarity * 5) + 3 : Math.sqrt(l.similarity * 3) + 1
         );
 
       // Dim unconnected labels
@@ -241,83 +281,6 @@ export default function GraphVisualization({
         .attr('stroke', '#64748b')
         .attr('stroke-width', d => Math.sqrt(d.similarity * 3) + 1);
       labels.style('opacity', 0.9);
-    }
-
-    // Fixed center on node function
-    function centerOnNode(node: GraphNode) {
-      // Ensure node has valid coordinates before proceeding
-      if (!node.x || !node.y || isNaN(node.x) || isNaN(node.y)) {
-        console.warn('Node does not have valid coordinates:', node);
-        return;
-      }
-
-      // Zoom and center on the node
-      const scale = 1.5;
-      const transform = d3.zoomIdentity
-        .translate(width / 2 - node.x * scale, height / 2 - node.y * scale)
-        .scale(scale);
-
-      svg.transition()
-        .duration(750)
-        .call(zoom.transform, transform);
-
-      // Find connected nodes
-      const connectedNodeIds = new Set<string>();
-      graphData.links.forEach(link => {
-        if (link.source === node.id) {
-          connectedNodeIds.add(link.target);
-        } else if (link.target === node.id) {
-          connectedNodeIds.add(link.source);
-        }
-      });
-
-      const connectedNodes = graphData.nodes.filter(n => 
-        connectedNodeIds.has(n.id) && n.x && n.y && !isNaN(n.x) && !isNaN(n.y)
-      );
-
-      // Arrange connected nodes in a circle around the selected node only if we have valid coordinates
-      if (connectedNodes.length > 0 && node.x && node.y) {
-        setTimeout(() => {
-          const radius = 120;
-          
-          // Store original positions to avoid jumping
-          const originalPositions = new Map();
-          connectedNodes.forEach(connectedNode => {
-            originalPositions.set(connectedNode.id, { x: connectedNode.x, y: connectedNode.y });
-          });
-          
-          connectedNodes.forEach((connectedNode, index) => {
-            const angle = (2 * Math.PI * index) / connectedNodes.length;
-            const newX = node.x! + Math.cos(angle) * radius;
-            const newY = node.y! + Math.sin(angle) * radius;
-            
-            // Only set fixed positions if they're valid
-            if (!isNaN(newX) && !isNaN(newY)) {
-              connectedNode.fx = newX;
-              connectedNode.fy = newY;
-            }
-          });
-
-          // Fix the center node temporarily only if it has valid coordinates
-          if (node.x && node.y && !isNaN(node.x) && !isNaN(node.y)) {
-            node.fx = node.x;
-            node.fy = node.y;
-          }
-
-          // Gently restart simulation
-          simulation.alpha(0.2).restart();
-
-          // Release fixed positions after animation
-          setTimeout(() => {
-            connectedNodes.forEach(n => {
-              n.fx = null;
-              n.fy = null;
-            });
-            node.fx = null;
-            node.fy = null;
-          }, 2000);
-        }, 750);
-      }
     }
 
     // Update positions on simulation tick
@@ -357,16 +320,27 @@ export default function GraphVisualization({
       }
     });
 
-    // Update selected node styling
-    updateSelectedNodeStyling();
-
+    // Update selected node styling and highlight its connections
     function updateSelectedNodeStyling() {
-      nodes.attr('stroke', d => 
-        d.id === selectedNodeId ? '#fbbf24' : '#ffffff'
-      ).attr('stroke-width', d => 
-        d.id === selectedNodeId ? 4 : 2
-      );
+      // Reset all styling first
+      resetHighlights();
+      
+      // Apply selection styling
+      nodes
+        .attr('stroke', d => d.id === selectedNodeId ? '#fbbf24' : '#ffffff')
+        .attr('stroke-width', d => d.id === selectedNodeId ? 4 : 2);
+
+      // Highlight connections for selected node
+      if (selectedNodeId) {
+        const selectedNode = graphData.nodes.find(n => n.id === selectedNodeId);
+        if (selectedNode) {
+          highlightConnections(selectedNode, '#00ff88', false); // Bright green for selection
+        }
+      }
     }
+
+    // Call styling update
+    updateSelectedNodeStyling();
 
     setIsReady(true);
 
@@ -466,6 +440,7 @@ export default function GraphVisualization({
             <div className="absolute bottom-4 right-4 bg-blue-800/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-blue-600">
               <div className="text-xs text-blue-200">
                 <div className="text-blue-100 font-medium mb-1">Node Selected</div>
+                <div>Connections highlighted in <span className="text-green-400 font-bold">bright green</span></div>
                 <div>Click background to deselect</div>
               </div>
             </div>

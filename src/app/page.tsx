@@ -120,9 +120,9 @@ export default function Home() {
           </p>
         </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-          {/* Controls Panel */}
-          <div className="lg:col-span-1 space-y-4 max-h-screen overflow-y-auto">
+        {/* Controls Section - Top */}
+        <div className="mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             
             {/* File Upload */}
             <div className="bg-gray-800 p-4 rounded-lg border border-gray-700">
@@ -146,7 +146,7 @@ export default function Home() {
                 placeholder="sk-..."
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                className="w-full p-2 bg-gray-700 text-white rounded border border-gray-600 placeholder-gray-400"
+                className="w-full p-2 bg-gray-700 text-white rounded border border-gray-600 placeholder-gray-400 text-sm"
               />
               <p className="text-xs text-gray-400 mt-1">
                 Required for generating embeddings
@@ -161,17 +161,17 @@ export default function Home() {
                 <button
                   onClick={generateEmbeddings}
                   disabled={loading || !dataPoints.length || !apiKey}
-                  className="w-full p-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded transition-colors"
+                  className="w-full p-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded transition-colors text-sm"
                 >
-                  {loading ? 'Generating...' : hasEmbeddings ? 'Regenerate Embeddings' : 'Generate Embeddings'}
+                  {loading ? 'Generating...' : hasEmbeddings ? 'Regenerate' : 'Generate'}
                 </button>
                 
                 {hasEmbeddings && (
                   <button
                     onClick={downloadEmbeddings}
-                    className="w-full p-2 bg-green-600 hover:bg-green-700 rounded transition-colors"
+                    className="w-full p-2 bg-green-600 hover:bg-green-700 rounded transition-colors text-sm"
                   >
-                    Download Embeddings
+                    Download
                   </button>
                 )}
               </div>
@@ -184,7 +184,7 @@ export default function Home() {
                       style={{ width: `${progress}%` }}
                     />
                   </div>
-                  <p className="text-sm text-gray-400 mt-1">{status}</p>
+                  <p className="text-xs text-gray-400 mt-1">{status}</p>
                 </div>
               )}
             </div>
@@ -204,18 +204,18 @@ export default function Home() {
                       setConnectionStrategy(e.target.value as any);
                       if (hasEmbeddings) regenerateGraph();
                     }}
-                    className="w-full p-2 bg-gray-700 text-white rounded border border-gray-600"
+                    className="w-full p-2 bg-gray-700 text-white rounded border border-gray-600 text-sm"
                   >
-                    <option value="top3">Top 3 connections per node</option>
-                    <option value="top5">Top 5 connections per node</option>
-                    <option value="threshold">Similarity threshold</option>
+                    <option value="top3">Top 3</option>
+                    <option value="top5">Top 5</option>
+                    <option value="threshold">Threshold</option>
                   </select>
                 </div>
 
                 {connectionStrategy === 'threshold' && (
                   <div>
                     <label className="block text-sm text-gray-300 mb-1">
-                      Similarity Threshold: {similarityThreshold.toFixed(2)}
+                      Threshold: {similarityThreshold.toFixed(2)}
                     </label>
                     <input
                       type="range"
@@ -235,69 +235,40 @@ export default function Home() {
                 {hasEmbeddings && (
                   <button
                     onClick={regenerateGraph}
-                    className="w-full p-2 bg-purple-600 hover:bg-purple-700 rounded transition-colors"
+                    className="w-full p-2 bg-purple-600 hover:bg-purple-700 rounded transition-colors text-sm"
                   >
-                    Regenerate Graph
+                    Regenerate
                   </button>
                 )}
               </div>
               
-              <div className="mt-3 pt-3 border-t border-gray-700 text-sm text-gray-400">
+              <div className="mt-3 pt-3 border-t border-gray-700 text-xs text-gray-400">
                 <div>Nodes: <span className="text-white">{graphData.nodes.length}</span></div>
-                <div>Connections: <span className="text-white">{graphData.links.length}</span></div>
+                <div>Links: <span className="text-white">{graphData.links.length}</span></div>
               </div>
             </div>
-
-            {/* Selected Node Info */}
-            {selectedNode && (
-              <div className="bg-blue-900 p-4 rounded-lg border border-blue-700">
-                <h3 className="text-lg font-semibold mb-2 text-blue-100">Selected Node</h3>
-                <div className="text-sm space-y-2">
-                  <div>
-                    <span className="text-blue-300 font-medium">Text:</span>
-                    <p className="text-blue-100 mt-1">{selectedNode.text}</p>
-                  </div>
-                  {selectedNode.category && (
-                    <div>
-                      <span className="text-blue-300 font-medium">Category:</span>
-                      <p className="text-blue-100">{selectedNode.category}</p>
-                    </div>
-                  )}
-                  {selectedNode.embedding && (
-                    <div>
-                      <span className="text-blue-300 font-medium">Embedding:</span>
-                      <p className="text-blue-100">{selectedNode.embedding.length} dimensions</p>
-                    </div>
-                  )}
-                  {selectedNode.metadata && (
-                    <div>
-                      <span className="text-blue-300 font-medium">Metadata:</span>
-                      <pre className="text-xs text-blue-100 mt-1 bg-blue-800 p-2 rounded overflow-x-auto">
-                        {JSON.stringify(selectedNode.metadata, null, 2)}
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Error Display */}
-            {error && (
-              <div className="bg-red-900 p-4 rounded-lg border border-red-700">
-                <p className="text-red-300">{error}</p>
-                <button
-                  onClick={() => setError('')}
-                  className="mt-2 text-red-400 hover:text-red-200 text-sm font-medium"
-                >
-                  Dismiss
-                </button>
-              </div>
-            )}
           </div>
+        </div>
 
-          {/* Visualization Panel */}
+        {/* Error Display */}
+        {error && (
+          <div className="mb-4 bg-red-900 p-4 rounded-lg border border-red-700">
+            <p className="text-red-300">{error}</p>
+            <button
+              onClick={() => setError('')}
+              className="mt-2 text-red-400 hover:text-red-200 text-sm font-medium"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Visualization Section - Bottom */}
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+          
+          {/* Graph Visualization */}
           <div className="lg:col-span-3">
-            <div className="bg-gray-800 rounded-lg border border-gray-700" style={{ height: '80vh' }}>
+            <div className="bg-gray-800 rounded-lg border border-gray-700" style={{ height: '70vh' }}>
               {graphData.nodes.length > 0 ? (
                 <GraphVisualization
                   graphData={graphData}
@@ -317,6 +288,126 @@ export default function Home() {
                         3. Click nodes to explore
                       </p>
                     </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Node Details Card */}
+          <div className="lg:col-span-1">
+            <div className="bg-gray-800 rounded-lg border border-gray-700 p-4" style={{ height: '70vh' }}>
+              {selectedNode ? (
+                <div className="h-full flex flex-col">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-white">Node Details</h3>
+                    <button
+                      onClick={() => setSelectedNode(null)}
+                      className="text-gray-400 hover:text-white transition-colors"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  
+                  <div className="flex-1 overflow-y-auto space-y-4">
+                    {/* Node ID */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-1">ID</label>
+                      <p className="text-sm text-gray-100 bg-gray-700 p-2 rounded">{selectedNode.id}</p>
+                    </div>
+
+                    {/* Text Content */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-1">Text</label>
+                      <div className="text-sm text-gray-100 bg-gray-700 p-3 rounded max-h-32 overflow-y-auto">
+                        {selectedNode.text}
+                      </div>
+                    </div>
+
+                    {/* Category */}
+                    {selectedNode.category && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Category</label>
+                        <p className="text-sm text-gray-100 bg-gray-700 p-2 rounded">{selectedNode.category}</p>
+                      </div>
+                    )}
+
+                    {/* Embedding Info */}
+                    {selectedNode.embedding && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Embedding</label>
+                        <p className="text-sm text-gray-100 bg-gray-700 p-2 rounded">
+                          {selectedNode.embedding.length} dimensions
+                        </p>
+                        <details className="mt-2">
+                          <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-300">
+                            Show first 10 values
+                          </summary>
+                          <div className="mt-2 text-xs text-gray-300 bg-gray-600 p-2 rounded font-mono">
+                            [{selectedNode.embedding.slice(0, 10).map(v => v.toFixed(4)).join(', ')}...]
+                          </div>
+                        </details>
+                      </div>
+                    )}
+
+                    {/* Metadata */}
+                    {selectedNode.metadata && Object.keys(selectedNode.metadata).length > 0 && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Metadata</label>
+                        <div className="text-xs text-gray-100 bg-gray-700 p-3 rounded overflow-x-auto">
+                          <pre>{JSON.stringify(selectedNode.metadata, null, 2)}</pre>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Connected Nodes */}
+                    {graphData.links.length > 0 && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">
+                          Connected Nodes ({
+                            graphData.links.filter(link => 
+                              link.source === selectedNode.id || link.target === selectedNode.id
+                            ).length
+                          })
+                        </label>
+                        <div className="space-y-2 max-h-32 overflow-y-auto">
+                          {graphData.links
+                            .filter(link => link.source === selectedNode.id || link.target === selectedNode.id)
+                            .slice(0, 5)
+                            .map((link, index) => {
+                              const connectedNodeId = link.source === selectedNode.id ? link.target : link.source;
+                              const connectedNode = graphData.nodes.find(n => n.id === connectedNodeId);
+                              return (
+                                <div key={index} className="text-xs bg-gray-700 p-2 rounded">
+                                  <div className="font-medium text-gray-200">
+                                    {connectedNode?.text.substring(0, 50)}...
+                                  </div>
+                                  <div className="text-gray-400 mt-1">
+                                    Similarity: {link.similarity.toFixed(3)}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          {graphData.links.filter(link => 
+                            link.source === selectedNode.id || link.target === selectedNode.id
+                          ).length > 5 && (
+                            <div className="text-xs text-gray-400 text-center py-2">
+                              ... and {graphData.links.filter(link => 
+                                link.source === selectedNode.id || link.target === selectedNode.id
+                              ).length - 5} more
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="h-full flex items-center justify-center text-gray-400">
+                  <div className="text-center">
+                    <div className="text-4xl mb-4">🎯</div>
+                    <p className="text-lg mb-2">No node selected</p>
+                    <p className="text-sm">Click on a node in the graph to view its details</p>
                   </div>
                 </div>
               )}
