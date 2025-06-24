@@ -10,7 +10,6 @@ export default function Home() {
   const [dataPoints, setDataPoints] = useState<DataPoint[]>([]);
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
   const [selectedNode, setSelectedNode] = useState<DataPoint | null>(null);
-  const [hoveredNode, setHoveredNode] = useState<DataPoint | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -101,8 +100,10 @@ export default function Home() {
     setSelectedNode(node);
   };
 
+  // Dummy function to satisfy the interface but not used for reading
   const handleNodeHover = (node: DataPoint | null) => {
-    setHoveredNode(node);
+    // This function is required by the interface but we don't use it for reading anymore
+    // Only used internally in GraphVisualization for visual feedback
   };
 
   const hasEmbeddings = dataPoints.some(d => d.embedding);
@@ -280,24 +281,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* Hover Preview */}
-            {hoveredNode && hoveredNode !== selectedNode && (
-              <div className="bg-yellow-900 p-3 rounded-lg border border-yellow-700">
-                <h4 className="text-sm font-semibold text-yellow-100 mb-1">Hovering</h4>
-                <p className="text-xs text-yellow-200">
-                  {hoveredNode.text.length > 100 
-                    ? hoveredNode.text.substring(0, 100) + '...' 
-                    : hoveredNode.text
-                  }
-                </p>
-                {hoveredNode.category && (
-                  <p className="text-xs text-yellow-300 mt-1">
-                    Category: {hoveredNode.category}
-                  </p>
-                )}
-              </div>
-            )}
-
             {/* Error Display */}
             {error && (
               <div className="bg-red-900 p-4 rounded-lg border border-red-700">
@@ -331,7 +314,7 @@ export default function Home() {
                       <p className="text-sm">
                         1. Upload a CSV/JSON file<br/>
                         2. Generate embeddings<br/>
-                        3. Explore the graph
+                        3. Click nodes to explore
                       </p>
                     </div>
                   </div>

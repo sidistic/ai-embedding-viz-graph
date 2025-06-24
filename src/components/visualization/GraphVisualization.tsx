@@ -173,7 +173,7 @@ export default function GraphVisualization({
       centerOnNode(d);
     }
 
-    // Node hover handlers
+    // Node hover handlers - only for visual feedback, no reading
     function handleNodeMouseOver(event: MouseEvent, d: GraphNode) {
       // Enlarge node
       d3.select(event.currentTarget as SVGCircleElement)
@@ -185,7 +185,7 @@ export default function GraphVisualization({
       // Highlight connected nodes and links
       highlightConnections(d);
       
-      onNodeHover(d);
+      // Don't call onNodeHover for reading - only for visual feedback
     }
 
     function handleNodeMouseOut(event: MouseEvent, d: GraphNode) {
@@ -199,7 +199,7 @@ export default function GraphVisualization({
       // Reset all highlights
       resetHighlights();
       
-      onNodeHover(null);
+      // Don't call onNodeHover(null)
     }
 
     // Highlight connections function
@@ -243,9 +243,13 @@ export default function GraphVisualization({
       labels.style('opacity', 0.9);
     }
 
-    // Center on node function with connected node arrangement
+    // Fixed center on node function
     function centerOnNode(node: GraphNode) {
-      if (!node.x || !node.y) return;
+      // Ensure node has valid coordinates before proceeding
+      if (!node.x || !node.y || isNaN(node.x) || isNaN(node.y)) {
+        console.warn('Node does not have valid coordinates:', node);
+        return;
+      }
 
       // Zoom and center on the node
       const scale = 1.5;
@@ -267,24 +271,41 @@ export default function GraphVisualization({
         }
       });
 
-      const connectedNodes = graphData.nodes.filter(n => connectedNodeIds.has(n.id));
+      const connectedNodes = graphData.nodes.filter(n => 
+        connectedNodeIds.has(n.id) && n.x && n.y && !isNaN(n.x) && !isNaN(n.y)
+      );
 
-      // Arrange connected nodes in a circle around the selected node
-      setTimeout(() => {
-        if (connectedNodes.length > 0) {
+      // Arrange connected nodes in a circle around the selected node only if we have valid coordinates
+      if (connectedNodes.length > 0 && node.x && node.y) {
+        setTimeout(() => {
           const radius = 120;
+          
+          // Store original positions to avoid jumping
+          const originalPositions = new Map();
+          connectedNodes.forEach(connectedNode => {
+            originalPositions.set(connectedNode.id, { x: connectedNode.x, y: connectedNode.y });
+          });
           
           connectedNodes.forEach((connectedNode, index) => {
             const angle = (2 * Math.PI * index) / connectedNodes.length;
-            connectedNode.fx = node.x! + Math.cos(angle) * radius;
-            connectedNode.fy = node.y! + Math.sin(angle) * radius;
+            const newX = node.x! + Math.cos(angle) * radius;
+            const newY = node.y! + Math.sin(angle) * radius;
+            
+            // Only set fixed positions if they're valid
+            if (!isNaN(newX) && !isNaN(newY)) {
+              connectedNode.fx = newX;
+              connectedNode.fy = newY;
+            }
           });
 
-          // Fix the center node temporarily
-          node.fx = node.x;
-          node.fy = node.y;
+          // Fix the center node temporarily only if it has valid coordinates
+          if (node.x && node.y && !isNaN(node.x) && !isNaN(node.y)) {
+            node.fx = node.x;
+            node.fy = node.y;
+          }
 
-          simulation.alpha(0.3).restart();
+          // Gently restart simulation
+          simulation.alpha(0.2).restart();
 
           // Release fixed positions after animation
           setTimeout(() => {
@@ -295,25 +316,38 @@ export default function GraphVisualization({
             node.fx = null;
             node.fy = null;
           }, 2000);
-        }
-      }, 750);
+        }, 750);
+      }
     }
 
     // Update positions on simulation tick
     simulation.on('tick', () => {
+      // Ensure all coordinates are valid before updating
       links
-        .attr('x1', d => (d.source as any).x)
-        .attr('y1', d => (d.source as any).y)
-        .attr('x2', d => (d.target as any).x)
-        .attr('y2', d => (d.target as any).y);
+        .attr('x1', d => {
+          const sourceX = (d.source as any).x;
+          return isNaN(sourceX) ? 0 : sourceX;
+        })
+        .attr('y1', d => {
+          const sourceY = (d.source as any).y;
+          return isNaN(sourceY) ? 0 : sourceY;
+        })
+        .attr('x2', d => {
+          const targetX = (d.target as any).x;
+          return isNaN(targetX) ? 0 : targetX;
+        })
+        .attr('y2', d => {
+          const targetY = (d.target as any).y;
+          return isNaN(targetY) ? 0 : targetY;
+        });
 
       nodes
-        .attr('cx', d => d.x!)
-        .attr('cy', d => d.y!);
+        .attr('cx', d => isNaN(d.x!) ? 0 : d.x!)
+        .attr('cy', d => isNaN(d.y!) ? 0 : d.y!);
 
       labels
-        .attr('x', d => d.x!)
-        .attr('y', d => d.y!);
+        .attr('x', d => isNaN(d.x!) ? 0 : d.x!)
+        .attr('y', d => isNaN(d.y!) ? 0 : d.y!);
     });
 
     // Clear selection on background click
@@ -342,7 +376,7 @@ export default function GraphVisualization({
       simulationRef.current = null;
     };
 
-  }, [graphData, dimensions, selectedNodeId, onNodeClick, onNodeHover]);
+  }, [graphData, dimensions, selectedNodeId, onNodeClick]);
 
   // Helper functions
   const getNodeColor = (node: GraphNode): string => {
@@ -405,10 +439,10 @@ export default function GraphVisualization({
           <div className="absolute top-4 right-4 bg-gray-800/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-gray-600">
             <div className="text-xs text-gray-300 space-y-1">
               <div className="text-white font-medium mb-2">Controls</div>
-              <div>• <strong>Click</strong> node to center & arrange</div>
+              <div>• <strong>Click</strong> node to select & center</div>
               <div>• <strong>Drag</strong> nodes to move</div>
               <div>• <strong>Scroll</strong> to zoom</div>
-              <div>• <strong>Hover</strong> to see connections</div>
+              <div>• <strong>Hover</strong> to highlight connections</div>
             </div>
           </div>
 
