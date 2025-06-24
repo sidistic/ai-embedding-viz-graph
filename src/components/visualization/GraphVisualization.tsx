@@ -1,43 +1,28 @@
 'use client';
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
 import * as d3 from 'd3';
-import { NewsArticle, GraphData, GraphNode, GraphLink, CATEGORY_COLORS, VisualizationConfig } from '@/types';
-import { DataProcessor } from '@/lib/dataProcessor';
+import { GraphData, GraphNode, GraphLink, DataPoint, CATEGORY_COLORS } from '@/types';
 
-interface Props {
-  articles: NewsArticle[];
-  config?: Partial<VisualizationConfig>;
-  onNodeClick?: (article: NewsArticle) => void;
-  onNodeHover?: (article: NewsArticle | null) => void;
+interface GraphVisualizationProps {
+  graphData: GraphData;
+  onNodeClick: (node: DataPoint) => void;
+  onNodeHover: (node: DataPoint | null) => void;
+  selectedNodeId?: string | null;
 }
 
-const defaultConfig: VisualizationConfig = {
-  width: 800,
-  height: 600,
-  nodeSize: { min: 6, max: 16 },
-  linkStrength: { min: 0.1, max: 1.0 },
-  colors: CATEGORY_COLORS,
-  showLabels: true,
-  showLinks: true,
-  linkThreshold: 0.6
-};
-
-export default function GraphVisualization({ 
-  articles, 
-  config = {}, 
-  onNodeClick, 
-  onNodeHover 
-}: Props) {
+export default function GraphVisualization({
+  graphData,
+  onNodeClick,
+  onNodeHover,
+  selectedNodeId
+}: GraphVisualizationProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const simulationRef = useRef<d3.Simulation<GraphNode, GraphLink> | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
-  const [selectedNode, setSelectedNode] = useState<string | null>(null);
-  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  const [isReady, setIsReady] = useState(false);
 
-  const finalConfig = { ...defaultConfig, ...config };
-
-  // Update dimensions on resize with debouncing
+  // Update dimensions on resize
   const updateDimensions = useCallback(() => {
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
@@ -46,85 +31,42 @@ export default function GraphVisualization({
         height: Math.max(rect.height || 600, 400)
       };
       
-      // Only update if dimensions actually changed
       if (newDimensions.width !== dimensions.width || newDimensions.height !== dimensions.height) {
         setDimensions(newDimensions);
       }
     }
-  }, [dimensions.width, dimensions.height]);
+  }, [dimensions]);
 
   useEffect(() => {
     updateDimensions();
-    
     const resizeObserver = new ResizeObserver(updateDimensions);
     if (containerRef.current) {
       resizeObserver.observe(containerRef.current);
     }
-
-    return () => {
-      resizeObserver.disconnect();
-    };
+    return () => resizeObserver.disconnect();
   }, [updateDimensions]);
 
-  // Create graph data from articles
-  const createGraphData = useCallback((): GraphData => {
-    const nodes: GraphNode[] = articles.map((article, index) => ({
-      id: article.id,
-      title: article.title,
-      category: article.category,
-      categoryIndex: article.categoryIndex,
-      description: article.description,
-      embedding: article.embedding,
-      x: dimensions.width / 2 + (Math.random() - 0.5) * 200,
-      y: dimensions.height / 2 + (Math.random() - 0.5) * 200,
-      group: article.categoryIndex,
-      size: Math.max(
-        finalConfig.nodeSize.min,
-        Math.min(
-          finalConfig.nodeSize.max,
-          Math.sqrt(article.title.length) * 2 + 6
-        )
-      )
-    }));
-
-    const links: GraphLink[] = [];
-    
-    if (finalConfig.showLinks && articles.some(a => a.embedding)) {
-      const similarities = DataProcessor.findSimilarPairs(articles, finalConfig.linkThreshold);
-      
-      similarities.forEach(pair => {
-        links.push({
-          source: pair.id1,
-          target: pair.id2,
-          value: pair.similarity,
-          distance: 120 * (1 - pair.similarity) + 50 // Closer for more similar
-        });
-      });
+  // Main visualization effect
+  useEffect(() => {
+    if (!svgRef.current || !graphData.nodes.length) {
+      setIsReady(false);
+      return;
     }
 
-    return { nodes, links };
-  }, [articles, dimensions, finalConfig.showLinks, finalConfig.linkThreshold, finalConfig.nodeSize]);
-
-  useEffect(() => {
-    if (!svgRef.current || articles.length === 0) return;
-
-    // Stop previous simulation if it exists
+    // Stop previous simulation
     if (simulationRef.current) {
       simulationRef.current.stop();
     }
 
-    // Clear previous visualization
-    d3.select(svgRef.current).selectAll('*').remove();
-
     const svg = d3.select(svgRef.current);
     const { width, height } = dimensions;
 
-    // Create graph data
-    const graphData = createGraphData();
+    // Clear previous content
+    svg.selectAll('*').remove();
 
-    // Set up zoom behavior
+    // Create zoom behavior
     const zoom = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.2, 4])
+      .scaleExtent([0.1, 4])
       .on('zoom', (event) => {
         container.attr('transform', event.transform);
       });
@@ -132,225 +74,377 @@ export default function GraphVisualization({
     svg.call(zoom);
 
     // Create main container
-    const container = svg.append('g');
+    const container = svg.append('g').attr('class', 'main-container');
 
-    // Create force simulation
+    // Create groups for layers (order matters for rendering)
+    const linksGroup = container.append('g').attr('class', 'links');
+    const nodesGroup = container.append('g').attr('class', 'nodes');
+    const labelsGroup = container.append('g').attr('class', 'labels');
+
+    // Create simulation
     const simulation = d3.forceSimulation<GraphNode>(graphData.nodes)
       .force('link', d3.forceLink<GraphNode, GraphLink>(graphData.links)
         .id(d => d.id)
-        .distance(d => d.distance)
-        .strength(0.2)
+        .distance(d => d.distance || 80)
+        .strength(0.3)
       )
       .force('charge', d3.forceManyBody()
-        .strength(-300)
-        .distanceMax(200)
+        .strength(-400)
+        .distanceMax(300)
       )
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force('collision', d3.forceCollide()
-        .radius(d => d.size + 4)
+        .radius(d => (d.size || 8) + 4)
         .strength(0.8)
-      )
-      .force('x', d3.forceX(width / 2).strength(0.01))
-      .force('y', d3.forceY(height / 2).strength(0.01));
+      );
 
     simulationRef.current = simulation;
 
-    // Create links with better visibility
-    const link = container.append('g')
-      .attr('class', 'links')
+    // Create links
+    const links = linksGroup
       .selectAll('line')
       .data(graphData.links)
-      .enter().append('line')
-      .attr('stroke', '#64748b') // Better gray color
-      .attr('stroke-opacity', 0.8)
-      .attr('stroke-width', d => Math.sqrt(d.value * 4) + 1)
-      .style('filter', 'drop-shadow(0px 0px 2px rgba(100, 116, 139, 0.5))');
+      .enter()
+      .append('line')
+      .attr('class', 'graph-link')
+      .attr('stroke', '#64748b')
+      .attr('stroke-opacity', 0.6)
+      .attr('stroke-width', d => Math.sqrt(d.similarity * 3) + 1)
+      .style('pointer-events', 'none');
 
-    // Create node groups for better interaction
-    const nodeGroup = container.append('g')
-      .attr('class', 'nodes')
-      .selectAll('g')
+    // Create nodes
+    const nodes = nodesGroup
+      .selectAll('circle')
       .data(graphData.nodes)
-      .enter().append('g')
-      .attr('class', 'node-group')
-      .style('cursor', 'pointer');
-
-    // Add node circles
-    const node = nodeGroup.append('circle')
-      .attr('r', d => d.size)
-      .attr('fill', d => finalConfig.colors[d.category] || '#6b7280')
+      .enter()
+      .append('circle')
+      .attr('class', 'graph-node')
+      .attr('r', d => d.size || 8)
+      .attr('fill', d => getNodeColor(d))
       .attr('stroke', '#ffffff')
       .attr('stroke-width', 2)
+      .style('cursor', 'pointer')
       .style('filter', 'drop-shadow(0px 2px 4px rgba(0, 0, 0, 0.3))')
-      .on('click', (event, d) => {
-        event.stopPropagation();
-        setSelectedNode(d.id === selectedNode ? null : d.id);
-        const article = articles.find(a => a.id === d.id);
-        if (article && onNodeClick) onNodeClick(article);
-      })
-      .on('mouseover', (event, d) => {
-        setHoveredNode(d.id);
-        const article = articles.find(a => a.id === d.id);
-        if (article && onNodeHover) onNodeHover(article);
-        
-        // Highlight effect
-        d3.select(event.currentTarget)
-          .transition()
-          .duration(200)
-          .attr('stroke-width', 4)
-          .attr('r', d.size * 1.2);
-        
-        // Highlight connected nodes and links
-        const connectedLinks = graphData.links.filter(l => 
-          (l.source as any).id === d.id || (l.target as any).id === d.id
-        );
-        const connectedNodeIds = new Set(connectedLinks.flatMap(l => 
-          [(l.source as any).id, (l.target as any).id]
-        ));
+      .on('click', handleNodeClick)
+      .on('mouseover', handleNodeMouseOver)
+      .on('mouseout', handleNodeMouseOut);
 
-        node.style('opacity', n => connectedNodeIds.has(n.id) || n.id === d.id ? 1 : 0.3);
-        link.style('opacity', l => 
-          (l.source as any).id === d.id || (l.target as any).id === d.id ? 1 : 0.2
-        );
-
-        // Highlight connected links
-        link.attr('stroke', l =>
-          (l.source as any).id === d.id || (l.target as any).id === d.id ? '#fbbf24' : '#64748b'
-        );
-      })
-      .on('mouseout', (event, d) => {
-        setHoveredNode(null);
-        if (onNodeHover) onNodeHover(null);
-        
-        // Remove highlight effect
-        d3.select(event.currentTarget)
-          .transition()
-          .duration(200)
-          .attr('stroke-width', 2)
-          .attr('r', d.size);
-        
-        // Reset opacity and colors
-        node.style('opacity', 1);
-        link.style('opacity', 0.8)
-          .attr('stroke', '#64748b');
-      });
-
-    // Add labels if enabled
-    let labels: d3.Selection<SVGTextElement, GraphNode, SVGGElement, unknown> | null = null;
-    if (finalConfig.showLabels) {
-      labels = nodeGroup.append('text')
-        .text(d => d.title.length > 25 ? d.title.substring(0, 25) + '...' : d.title)
-        .attr('font-size', '11px')
-        .attr('font-family', 'Arial, sans-serif')
-        .attr('font-weight', '500')
-        .attr('text-anchor', 'middle')
-        .attr('dy', d => d.size + 18)
-        .attr('fill', '#e5e7eb') // Light gray for visibility on dark background
-        .style('pointer-events', 'none')
-        .style('text-shadow', '1px 1px 2px rgba(0, 0, 0, 0.8)')
-        .style('opacity', 0.9);
-    }
+    // Create labels
+    const labels = labelsGroup
+      .selectAll('text')
+      .data(graphData.nodes)
+      .enter()
+      .append('text')
+      .attr('class', 'graph-label')
+      .text(d => truncateText(d.text, 20))
+      .attr('font-size', '10px')
+      .attr('font-family', 'Arial, sans-serif')
+      .attr('font-weight', '500')
+      .attr('text-anchor', 'middle')
+      .attr('dy', d => (d.size || 8) + 15)
+      .attr('fill', '#e5e7eb')
+      .style('pointer-events', 'none')
+      .style('text-shadow', '1px 1px 2px rgba(0, 0, 0, 0.8)')
+      .style('opacity', 0.9);
 
     // Add drag behavior
-    const drag = d3.drag<SVGGElement, GraphNode>()
-      .on('start', (event, d) => {
+    const drag = d3.drag<SVGCircleElement, GraphNode>()
+      .on('start', function(event, d) {
         if (!event.active) simulation.alphaTarget(0.3).restart();
         d.fx = d.x;
         d.fy = d.y;
       })
-      .on('drag', (event, d) => {
+      .on('drag', function(event, d) {
         d.fx = event.x;
         d.fy = event.y;
       })
-      .on('end', (event, d) => {
+      .on('end', function(event, d) {
         if (!event.active) simulation.alphaTarget(0);
         d.fx = null;
         d.fy = null;
       });
 
-    nodeGroup.call(drag);
+    nodes.call(drag);
 
-    // Update positions on each simulation tick
+    // Node click handler
+    function handleNodeClick(event: MouseEvent, d: GraphNode) {
+      event.stopPropagation();
+      onNodeClick(d);
+      centerOnNode(d);
+    }
+
+    // Node hover handlers
+    function handleNodeMouseOver(event: MouseEvent, d: GraphNode) {
+      // Enlarge node
+      d3.select(event.currentTarget as SVGCircleElement)
+        .transition()
+        .duration(200)
+        .attr('r', (d.size || 8) * 1.3)
+        .attr('stroke-width', 3);
+
+      // Highlight connected nodes and links
+      highlightConnections(d);
+      
+      onNodeHover(d);
+    }
+
+    function handleNodeMouseOut(event: MouseEvent, d: GraphNode) {
+      // Reset node size
+      d3.select(event.currentTarget as SVGCircleElement)
+        .transition()
+        .duration(200)
+        .attr('r', d.size || 8)
+        .attr('stroke-width', 2);
+
+      // Reset all highlights
+      resetHighlights();
+      
+      onNodeHover(null);
+    }
+
+    // Highlight connections function
+    function highlightConnections(node: GraphNode) {
+      const connectedIds = new Set<string>();
+      const connectedLinks = new Set<GraphLink>();
+
+      graphData.links.forEach(link => {
+        if (link.source === node.id || link.target === node.id) {
+          connectedLinks.add(link);
+          connectedIds.add(link.source === node.id ? link.target : link.source);
+        }
+      });
+
+      // Dim unconnected nodes
+      nodes.style('opacity', n => 
+        n.id === node.id || connectedIds.has(n.id) ? 1 : 0.3
+      );
+
+      // Highlight connected links
+      links
+        .style('opacity', l => connectedLinks.has(l) ? 1 : 0.1)
+        .attr('stroke', l => connectedLinks.has(l) ? '#fbbf24' : '#64748b')
+        .attr('stroke-width', l => 
+          connectedLinks.has(l) ? Math.sqrt(l.similarity * 5) + 2 : Math.sqrt(l.similarity * 3) + 1
+        );
+
+      // Dim unconnected labels
+      labels.style('opacity', n => 
+        n.id === node.id || connectedIds.has(n.id) ? 1 : 0.3
+      );
+    }
+
+    // Reset highlights function
+    function resetHighlights() {
+      nodes.style('opacity', 1);
+      links
+        .style('opacity', 0.6)
+        .attr('stroke', '#64748b')
+        .attr('stroke-width', d => Math.sqrt(d.similarity * 3) + 1);
+      labels.style('opacity', 0.9);
+    }
+
+    // Center on node function with connected node arrangement
+    function centerOnNode(node: GraphNode) {
+      if (!node.x || !node.y) return;
+
+      // Zoom and center on the node
+      const scale = 1.5;
+      const transform = d3.zoomIdentity
+        .translate(width / 2 - node.x * scale, height / 2 - node.y * scale)
+        .scale(scale);
+
+      svg.transition()
+        .duration(750)
+        .call(zoom.transform, transform);
+
+      // Find connected nodes
+      const connectedNodeIds = new Set<string>();
+      graphData.links.forEach(link => {
+        if (link.source === node.id) {
+          connectedNodeIds.add(link.target);
+        } else if (link.target === node.id) {
+          connectedNodeIds.add(link.source);
+        }
+      });
+
+      const connectedNodes = graphData.nodes.filter(n => connectedNodeIds.has(n.id));
+
+      // Arrange connected nodes in a circle around the selected node
+      setTimeout(() => {
+        if (connectedNodes.length > 0) {
+          const radius = 120;
+          
+          connectedNodes.forEach((connectedNode, index) => {
+            const angle = (2 * Math.PI * index) / connectedNodes.length;
+            connectedNode.fx = node.x! + Math.cos(angle) * radius;
+            connectedNode.fy = node.y! + Math.sin(angle) * radius;
+          });
+
+          // Fix the center node temporarily
+          node.fx = node.x;
+          node.fy = node.y;
+
+          simulation.alpha(0.3).restart();
+
+          // Release fixed positions after animation
+          setTimeout(() => {
+            connectedNodes.forEach(n => {
+              n.fx = null;
+              n.fy = null;
+            });
+            node.fx = null;
+            node.fy = null;
+          }, 2000);
+        }
+      }, 750);
+    }
+
+    // Update positions on simulation tick
     simulation.on('tick', () => {
-      link
+      links
         .attr('x1', d => (d.source as any).x)
         .attr('y1', d => (d.source as any).y)
         .attr('x2', d => (d.target as any).x)
         .attr('y2', d => (d.target as any).y);
 
-      nodeGroup
-        .attr('transform', d => `translate(${d.x},${d.y})`);
+      nodes
+        .attr('cx', d => d.x!)
+        .attr('cy', d => d.y!);
+
+      labels
+        .attr('x', d => d.x!)
+        .attr('y', d => d.y!);
     });
 
-    // Click on empty space to deselect
-    svg.on('click', () => {
-      setSelectedNode(null);
-      if (onNodeClick) onNodeClick(null as any);
+    // Clear selection on background click
+    svg.on('click', (event) => {
+      if (event.target === svg.node()) {
+        onNodeClick(null as any);
+      }
     });
 
-    // Cleanup function
+    // Update selected node styling
+    updateSelectedNodeStyling();
+
+    function updateSelectedNodeStyling() {
+      nodes.attr('stroke', d => 
+        d.id === selectedNodeId ? '#fbbf24' : '#ffffff'
+      ).attr('stroke-width', d => 
+        d.id === selectedNodeId ? 4 : 2
+      );
+    }
+
+    setIsReady(true);
+
+    // Cleanup
     return () => {
       simulation.stop();
       simulationRef.current = null;
     };
 
-  }, [articles, dimensions, finalConfig, createGraphData, selectedNode, onNodeClick, onNodeHover]);
+  }, [graphData, dimensions, selectedNodeId, onNodeClick, onNodeHover]);
+
+  // Helper functions
+  const getNodeColor = (node: GraphNode): string => {
+    if (node.color) return node.color;
+    if (node.category) {
+      return CATEGORY_COLORS[node.category as keyof typeof CATEGORY_COLORS] || CATEGORY_COLORS.default;
+    }
+    return CATEGORY_COLORS.default;
+  };
+
+  const truncateText = (text: string, maxLength: number): string => {
+    return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+  };
+
+  const getCategoryStats = () => {
+    const stats: Record<string, number> = {};
+    graphData.nodes.forEach(node => {
+      if (node.category) {
+        stats[node.category] = (stats[node.category] || 0) + 1;
+      }
+    });
+    return stats;
+  };
 
   return (
     <div 
       ref={containerRef} 
-      className="relative w-full h-full bg-gray-900 rounded-lg overflow-hidden border border-gray-700"
+      className="relative w-full h-full bg-gray-900 rounded-lg overflow-hidden"
     >
       <svg
         ref={svgRef}
         width={dimensions.width}
         height={dimensions.height}
         className="w-full h-full"
+        style={{ background: '#1e293b' }}
       />
       
       {/* Legend */}
-      <div className="absolute top-4 left-4 bg-gray-800/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-gray-600">
-        <h4 className="font-semibold text-sm mb-2 text-white">Categories</h4>
-        <div className="space-y-1">
-          {Object.entries(finalConfig.colors).map(([category, color]) => (
-            <div key={category} className="flex items-center gap-2 text-xs">
-              <div 
-                className="w-3 h-3 rounded-full border border-white/20" 
-                style={{ backgroundColor: color }}
-              />
-              <span className="text-gray-200">{category}</span>
+      {isReady && (
+        <>
+          <div className="absolute top-4 left-4 bg-gray-800/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-gray-600 max-w-xs">
+            <h4 className="font-semibold text-sm mb-2 text-white">Categories</h4>
+            <div className="space-y-1">
+              {Object.entries(getCategoryStats()).map(([category, count]) => (
+                <div key={category} className="flex items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <div 
+                      className="w-3 h-3 rounded-full border border-white/20" 
+                      style={{ backgroundColor: getNodeColor({ category } as GraphNode) }}
+                    />
+                    <span className="text-gray-200">{category}</span>
+                  </div>
+                  <span className="text-gray-400">{count}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </div>
+          </div>
 
-      {/* Controls */}
-      <div className="absolute top-4 right-4 bg-gray-800/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-gray-600">
-        <div className="text-xs text-gray-300 space-y-1">
-          <div>• Click and drag nodes</div>
-          <div>• Zoom with mouse wheel</div>
-          <div>• Hover to see connections</div>
-          <div>• Click empty space to deselect</div>
-        </div>
-      </div>
+          {/* Controls */}
+          <div className="absolute top-4 right-4 bg-gray-800/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-gray-600">
+            <div className="text-xs text-gray-300 space-y-1">
+              <div className="text-white font-medium mb-2">Controls</div>
+              <div>• <strong>Click</strong> node to center & arrange</div>
+              <div>• <strong>Drag</strong> nodes to move</div>
+              <div>• <strong>Scroll</strong> to zoom</div>
+              <div>• <strong>Hover</strong> to see connections</div>
+            </div>
+          </div>
 
-      {/* Stats */}
-      <div className="absolute bottom-4 left-4 bg-gray-800/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-gray-600">
-        <div className="text-xs text-gray-300 space-y-1">
-          <div className="text-white font-medium">Graph Stats</div>
-          <div>Nodes: <span className="text-white">{articles.length}</span></div>
-          <div>With embeddings: <span className="text-white">{articles.filter(a => a.embedding).length}</span></div>
-          <div>Similarities: <span className="text-white">{DataProcessor.findSimilarPairs(articles, finalConfig.linkThreshold).length}</span></div>
-          <div>Threshold: <span className="text-white">{finalConfig.linkThreshold?.toFixed(2)}</span></div>
-        </div>
-      </div>
+          {/* Stats */}
+          <div className="absolute bottom-4 left-4 bg-gray-800/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-gray-600">
+            <div className="text-xs text-gray-300 space-y-1">
+              <div className="text-white font-medium mb-1">Graph Statistics</div>
+              <div>Nodes: <span className="text-white font-medium">{graphData.nodes.length}</span></div>
+              <div>Connections: <span className="text-white font-medium">{graphData.links.length}</span></div>
+              <div>Avg similarity: <span className="text-white font-medium">
+                {graphData.links.length > 0 
+                  ? (graphData.links.reduce((sum, link) => sum + link.similarity, 0) / graphData.links.length).toFixed(3)
+                  : '0'
+                }
+              </span></div>
+            </div>
+          </div>
 
-      {/* Selected node indicator */}
-      {selectedNode && (
-        <div className="absolute bottom-4 right-4 bg-blue-800/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-blue-600">
-          <div className="text-xs text-blue-200">
-            <div className="text-blue-100 font-medium mb-1">Selected Node</div>
-            <div>ID: {selectedNode}</div>
+          {/* Selected node indicator */}
+          {selectedNodeId && (
+            <div className="absolute bottom-4 right-4 bg-blue-800/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-blue-600">
+              <div className="text-xs text-blue-200">
+                <div className="text-blue-100 font-medium mb-1">Node Selected</div>
+                <div>Click background to deselect</div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Loading indicator */}
+      {!isReady && graphData.nodes.length > 0 && (
+        <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
+          <div className="text-center">
+            <div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+            <p className="text-white">Initializing graph...</p>
           </div>
         </div>
       )}

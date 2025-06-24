@@ -1,31 +1,28 @@
-// Data types for visualization project
-export interface NewsArticle {
+// Core data types
+export interface DataPoint {
   id: string;
-  title: string;
-  description: string;
-  category: string;
-  categoryIndex: number;
+  text: string;
+  category?: string;
   embedding?: number[];
+  metadata?: Record<string, any>;
 }
 
-export interface GraphNode {
-  id: string;
-  title: string;
-  category: string;
-  categoryIndex: number;
-  x: number;
-  y: number;
-  group: number;
-  size: number;
-  description?: string;
-  embedding?: number[];
+// Graph visualization types
+export interface GraphNode extends DataPoint {
+  x?: number;
+  y?: number;
+  fx?: number | null;
+  fy?: number | null;
+  connections?: string[];
+  size?: number;
+  color?: string;
 }
 
 export interface GraphLink {
   source: string;
   target: string;
-  value: number; // similarity score
-  distance: number;
+  similarity: number;
+  distance?: number;
 }
 
 export interface GraphData {
@@ -33,6 +30,7 @@ export interface GraphData {
   links: GraphLink[];
 }
 
+// Embedding and processing types
 export interface EmbeddingJob {
   id: string;
   text: string;
@@ -41,6 +39,13 @@ export interface EmbeddingJob {
   error?: string;
 }
 
+export interface SimilarityPair {
+  id1: string;
+  id2: string;
+  similarity: number;
+}
+
+// Configuration types
 export interface VisualizationConfig {
   width: number;
   height: number;
@@ -57,16 +62,20 @@ export interface VisualizationConfig {
   };
   showLabels: boolean;
   showLinks: boolean;
-  linkThreshold: number; // minimum similarity to show link
+  linkThreshold: number;
 }
 
-export interface SimilarityPair {
-  id1: string;
-  id2: string;
-  similarity: number;
+// Connection strategy types
+export type ConnectionStrategy = 'top3' | 'top5' | 'threshold';
+
+// File upload types
+export interface FileUploadResult {
+  data: DataPoint[];
+  hasEmbeddings: boolean;
+  errors?: string[];
 }
 
-// Categories for AG News dataset
+// Categories for sample datasets
 export const AG_NEWS_CATEGORIES = {
   1: 'World',
   2: 'Sports', 
@@ -75,8 +84,14 @@ export const AG_NEWS_CATEGORIES = {
 } as const;
 
 export const CATEGORY_COLORS = {
-  'World': '#e74c3c',
-  'Sports': '#3498db',
-  'Business': '#2ecc71',
-  'Sci/Tech': '#f39c12'
+  'World': '#ef4444',
+  'Sports': '#3b82f6',
+  'Business': '#10b981',
+  'Sci/Tech': '#f59e0b',
+  'Technology': '#f59e0b',
+  'default': '#6b7280'
 } as const;
+
+// Utility types
+export type ProgressCallback = (progress: number, status: string) => void;
+export type ErrorCallback = (error: string) => void;
