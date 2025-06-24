@@ -142,16 +142,23 @@ export class DataProcessor {
       averageTextLength: 0
     };
 
+    // Fix for NaN error - check if there are articles first
+    if (articles.length === 0) {
+      return stats;
+    }
+
     let totalLength = 0;
     articles.forEach(article => {
       // Count by category
       stats.byCategory[article.category] = (stats.byCategory[article.category] || 0) + 1;
       
       // Calculate text length
-      totalLength += this.combineTextForEmbedding(article).length;
+      const textLength = this.combineTextForEmbedding(article).length;
+      totalLength += textLength;
     });
 
-    stats.averageTextLength = Math.round(totalLength / articles.length);
+    // Ensure we don't divide by zero and handle edge cases
+    stats.averageTextLength = articles.length > 0 ? Math.round(totalLength / articles.length) : 0;
 
     return stats;
   }

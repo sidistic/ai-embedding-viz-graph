@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0f172a;
+  --foreground: #f1f5f9;
 }
 
 @theme inline {
@@ -12,39 +12,45 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
+@media (prefers-color-scheme: light) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #0f172a;
+    --foreground: #f1f5f9;
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: 'Inter', 'Arial', sans-serif;
+  margin: 0;
+  padding: 0;
 }
 
 /* D3.js graph styling */
 .graph-container {
   position: relative;
   overflow: hidden;
+  background: #0f172a;
 }
 
 .graph-container svg {
   display: block;
+  background: #0f172a;
 }
 
 .graph-tooltip {
   position: absolute;
   padding: 8px 12px;
-  background: rgba(0, 0, 0, 0.8);
-  color: white;
-  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.95);
+  color: #f1f5f9;
+  border: 1px solid #334155;
+  border-radius: 6px;
   font-size: 12px;
   pointer-events: none;
   z-index: 1000;
   max-width: 200px;
+  backdrop-filter: blur(4px);
 }
 
 /* Force-directed graph specific styles */
@@ -55,6 +61,7 @@ body {
 
 .nodes circle:hover {
   stroke-width: 3px;
+  filter: brightness(1.2);
 }
 
 .links line {
@@ -62,28 +69,88 @@ body {
 }
 
 .labels text {
-  font-family: 'Arial', sans-serif;
-  font-size: 10px;
-  fill: #333;
+  font-family: 'Inter', 'Arial', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  fill: #e2e8f0;
   text-anchor: middle;
   pointer-events: none;
   user-select: none;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
 }
 
-/* Ensure form inputs have proper contrast */
+/* Form inputs with dark theme */
 input, textarea, select {
-  color: #111827 !important;
-  background-color: #ffffff !important;
+  color: #f1f5f9 !important;
+  background-color: #1e293b !important;
+  border: 1px solid #475569 !important;
+}
+
+input:focus, textarea:focus, select:focus {
+  border-color: #3b82f6 !important;
+  outline: none !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
 }
 
 input::placeholder, textarea::placeholder {
-  color: #6b7280 !important;
+  color: #94a3b8 !important;
 }
 
-/* Scrollbar styling */
+/* Checkbox styling */
+input[type="checkbox"] {
+  accent-color: #3b82f6;
+  width: 16px;
+  height: 16px;
+}
+
+/* Range slider styling */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 3px;
+  background: #475569;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #3b82f6;
+  cursor: pointer;
+  border: 2px solid #1e293b;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #3b82f6;
+  cursor: pointer;
+  border: 2px solid #1e293b;
+}
+
+/* Button hover effects */
+button {
+  transition: all 0.2s ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+/* Scrollbar styling for dark theme */
 .scrollbar-thin {
   scrollbar-width: thin;
-  scrollbar-color: #cbd5e0 #f7fafc;
+  scrollbar-color: #475569 #1e293b;
 }
 
 .scrollbar-thin::-webkit-scrollbar {
@@ -91,14 +158,49 @@ input::placeholder, textarea::placeholder {
 }
 
 .scrollbar-thin::-webkit-scrollbar-track {
-  background: #f7fafc;
+  background: #1e293b;
 }
 
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background-color: #cbd5e0;
+  background-color: #475569;
   border-radius: 4px;
 }
 
 .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background-color: #a0aec0;
+  background-color: #64748b;
+}
+
+/* Animation for loading states */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Graph overlay panels */
+.graph-overlay {
+  backdrop-filter: blur(8px);
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(71, 85, 105, 0.5);
+}
+
+/* Node selection highlight */
+.node-selected {
+  stroke: #fbbf24 !important;
+  stroke-width: 4px !important;
+  filter: drop-shadow(0px 0px 8px rgba(251, 191, 36, 0.6));
+}
+
+/* Link highlight */
+.link-highlighted {
+  stroke: #fbbf24 !important;
+  stroke-width: 3px !important;
+  filter: drop-shadow(0px 0px 4px rgba(251, 191, 36, 0.4));
 }
