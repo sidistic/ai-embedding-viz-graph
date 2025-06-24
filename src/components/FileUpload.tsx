@@ -12,10 +12,12 @@ export default function FileUpload({ onFileLoad, onError }: FileUploadProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const processingRef = useRef(false);
 
   const processFile = useCallback(async (file: File) => {
-    if (!file) return;
+    if (!file || processingRef.current) return;
 
+    processingRef.current = true;
     setIsLoading(true);
     onError(''); // Clear previous errors
 
@@ -50,6 +52,7 @@ export default function FileUpload({ onFileLoad, onError }: FileUploadProps) {
       onError(error.message || 'Failed to process file');
     } finally {
       setIsLoading(false);
+      processingRef.current = false;
       // Reset file input
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -59,33 +62,38 @@ export default function FileUpload({ onFileLoad, onError }: FileUploadProps) {
 
   const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) {
+    if (file && !processingRef.current) {
       processFile(file);
     }
   }, [processFile]);
 
   const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
+    event.stopPropagation();
     setIsDragging(false);
 
     const file = event.dataTransfer.files?.[0];
-    if (file) {
+    if (file && !processingRef.current) {
       processFile(file);
     }
   }, [processFile]);
 
   const handleDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
+    event.stopPropagation();
     setIsDragging(true);
   }, []);
 
   const handleDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
+    event.stopPropagation();
     setIsDragging(false);
   }, []);
 
   const handleClick = useCallback(() => {
-    fileInputRef.current?.click();
+    if (!processingRef.current) {
+      fileInputRef.current?.click();
+    }
   }, []);
 
   return (
@@ -112,6 +120,7 @@ export default function FileUpload({ onFileLoad, onError }: FileUploadProps) {
           onChange={handleFileChange}
           disabled={isLoading}
           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+          style={{ display: 'none' }}
         />
         
         <div className="space-y-2">
@@ -152,7 +161,7 @@ export default function FileUpload({ onFileLoad, onError }: FileUploadProps) {
       {/* Sample Data Button */}
       <button
         onClick={loadSampleData}
-        disabled={isLoading}
+        disabled={isLoading || processingRef.current}
         className="w-full p-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed text-white rounded transition-colors"
       >
         Load Sample Data (AG News)
@@ -162,6 +171,9 @@ export default function FileUpload({ onFileLoad, onError }: FileUploadProps) {
 
   // Load sample data function
   async function loadSampleData() {
+    if (processingRef.current) return;
+    
+    processingRef.current = true;
     setIsLoading(true);
     try {
       const sampleData = await generateSampleData();
@@ -170,6 +182,7 @@ export default function FileUpload({ onFileLoad, onError }: FileUploadProps) {
       onError(error.message);
     } finally {
       setIsLoading(false);
+      processingRef.current = false;
     }
   }
 }

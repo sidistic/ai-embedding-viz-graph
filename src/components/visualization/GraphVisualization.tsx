@@ -21,6 +21,9 @@ export default function GraphVisualization({
   const simulationRef = useRef<d3.Simulation<GraphNode, GraphLink> | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [isReady, setIsReady] = useState(false);
+  const nodesRef = useRef<d3.Selection<SVGCircleElement, GraphNode, SVGGElement, unknown> | null>(null);
+  const linksRef = useRef<d3.Selection<SVGLineElement, GraphLink, SVGGElement, unknown> | null>(null);
+  const labelsRef = useRef<d3.Selection<SVGTextElement, GraphNode, SVGGElement, unknown> | null>(null);
 
   // Update dimensions on resize
   const updateDimensions = useCallback(() => {
@@ -46,7 +49,76 @@ export default function GraphVisualization({
     return () => resizeObserver.disconnect();
   }, [updateDimensions]);
 
-  // Main visualization effect
+  // Separate effect for handling selection changes
+  useEffect(() => {
+    if (!nodesRef.current || !linksRef.current || !labelsRef.current) return;
+
+    const nodes = nodesRef.current;
+    const links = linksRef.current;
+    const labels = labelsRef.current;
+
+    // Helper function to get ID from link source/target
+    const getLinkId = (sourceOrTarget: any): string => {
+      return typeof sourceOrTarget === 'string' ? sourceOrTarget : sourceOrTarget.id;
+    };
+
+    if (selectedNodeId) {
+      const selectedNode = graphData.nodes.find(n => n.id === selectedNodeId);
+      if (selectedNode) {
+        // Find connected nodes and links
+        const connectedIds = new Set<string>();
+        const isConnectedLink = (link: any) => {
+          const sourceId = getLinkId(link.source);
+          const targetId = getLinkId(link.target);
+          return sourceId === selectedNode.id || targetId === selectedNode.id;
+        };
+
+        // Build set of connected node IDs
+        graphData.links.forEach(link => {
+          const sourceId = getLinkId(link.source);
+          const targetId = getLinkId(link.target);
+          
+          if (sourceId === selectedNode.id || targetId === selectedNode.id) {
+            connectedIds.add(sourceId === selectedNode.id ? targetId : sourceId);
+          }
+        });
+
+        // Apply selection styling
+        nodes
+          .attr('stroke', (n: any) => n.id === selectedNode.id ? '#fbbf24' : '#ffffff')
+          .attr('stroke-width', (n: any) => n.id === selectedNode.id ? 4 : 2)
+          .style('opacity', (n: any) => 
+            n.id === selectedNode.id || connectedIds.has(n.id) ? 1 : 0.3
+          );
+
+        links
+          .style('opacity', (l: any) => isConnectedLink(l) ? 1 : 0.1)
+          .attr('stroke', (l: any) => isConnectedLink(l) ? '#00ff88' : '#64748b')
+          .attr('stroke-width', (l: any) => 
+            isConnectedLink(l) ? Math.sqrt(l.similarity * 5) + 3 : Math.sqrt(l.similarity * 3) + 1
+          );
+
+        labels.style('opacity', (n: any) => 
+          n.id === selectedNode.id || connectedIds.has(n.id) ? 1 : 0.3
+        );
+      }
+    } else {
+      // Reset all styling
+      nodes
+        .attr('stroke', '#ffffff')
+        .attr('stroke-width', 2)
+        .style('opacity', 1);
+
+      links
+        .style('opacity', 0.6)
+        .attr('stroke', '#64748b')
+        .attr('stroke-width', (d: any) => Math.sqrt(d.similarity * 3) + 1);
+
+      labels.style('opacity', 0.9);
+    }
+  }, [selectedNodeId, graphData]);
+
+  // Main visualization effect - only recreate when graphData or dimensions change
   useEffect(() => {
     if (!svgRef.current || !graphData.nodes.length) {
       setIsReady(false);
@@ -112,6 +184,8 @@ export default function GraphVisualization({
       .attr('stroke-width', d => Math.sqrt(d.similarity * 3) + 1)
       .style('pointer-events', 'none');
 
+    linksRef.current = links;
+
     // Create nodes
     const nodes = nodesGroup
       .selectAll('circle')
@@ -128,6 +202,8 @@ export default function GraphVisualization({
       .on('click', handleNodeClick)
       .on('mouseover', handleNodeMouseOver)
       .on('mouseout', handleNodeMouseOut);
+
+    nodesRef.current = nodes;
 
     // Create labels
     const labels = labelsGroup
@@ -146,6 +222,8 @@ export default function GraphVisualization({
       .style('pointer-events', 'none')
       .style('text-shadow', '1px 1px 2px rgba(0, 0, 0, 0.8)')
       .style('opacity', 0.9);
+
+    labelsRef.current = labels;
 
     // Add drag behavior
     const drag = d3.drag<SVGCircleElement, GraphNode>()
@@ -166,130 +244,36 @@ export default function GraphVisualization({
 
     nodes.call(drag);
 
-    // Track selected node internally to avoid React re-renders
-    let currentlySelectedNodeId: string | null = selectedNodeId;
-
-    // Node click handler - direct DOM manipulation like mouse handlers
+    // Node click handler
     function handleNodeClick(event: MouseEvent, d: GraphNode) {
       event.stopPropagation();
-      
-      // If clicking the same node, deselect it
-      if (currentlySelectedNodeId === d.id) {
-        currentlySelectedNodeId = null;
-        onNodeClick(null as any);
-        resetAllSelectionStyling();
-      } else {
-        // Select new node
-        currentlySelectedNodeId = d.id;
-        onNodeClick(d);
-        applySelectionStyling(d);
-      }
+      onNodeClick(d);
     }
 
-    // Function to apply selection styling directly to DOM
-    function applySelectionStyling(selectedNode: GraphNode) {
-      // Helper function to get ID from link source/target
-      const getLinkId = (sourceOrTarget: any): string => {
-        return typeof sourceOrTarget === 'string' ? sourceOrTarget : sourceOrTarget.id;
-      };
-
-      // Find connected nodes and links
-      const connectedIds = new Set<string>();
-      const isConnectedLink = (link: any) => {
-        const sourceId = getLinkId(link.source);
-        const targetId = getLinkId(link.target);
-        return sourceId === selectedNode.id || targetId === selectedNode.id;
-      };
-
-      // Build set of connected node IDs
-      graphData.links.forEach(link => {
-        const sourceId = getLinkId(link.source);
-        const targetId = getLinkId(link.target);
-        
-        if (sourceId === selectedNode.id || targetId === selectedNode.id) {
-          connectedIds.add(sourceId === selectedNode.id ? targetId : sourceId);
-        }
-      });
-
-      // Apply selection styling - yellow border for selected node
-      nodes
-        .attr('stroke', (n: any) => n.id === selectedNode.id ? '#fbbf24' : '#ffffff')
-        .attr('stroke-width', (n: any) => n.id === selectedNode.id ? 4 : 2)
-        .style('opacity', (n: any) => 
-          n.id === selectedNode.id || connectedIds.has(n.id) ? 1 : 0.3
-        );
-
-      // Highlight connected links with bright green
-      links
-        .style('opacity', (l: any) => isConnectedLink(l) ? 1 : 0.1)
-        .attr('stroke', (l: any) => isConnectedLink(l) ? '#00ff88' : '#64748b')
-        .attr('stroke-width', (l: any) => 
-          isConnectedLink(l) ? Math.sqrt(l.similarity * 5) + 3 : Math.sqrt(l.similarity * 3) + 1
-        );
-
-      // Dim unconnected labels
-      labels.style('opacity', (n: any) => 
-        n.id === selectedNode.id || connectedIds.has(n.id) ? 1 : 0.3
-      );
-    }
-
-    // Function to reset all selection styling
-    function resetAllSelectionStyling() {
-      // Reset all nodes to default styling
-      nodes
-        .attr('stroke', '#ffffff')
-        .attr('stroke-width', 2)
-        .style('opacity', 1);
-
-      // Reset all links to default styling
-      links
-        .style('opacity', 0.6)
-        .attr('stroke', '#64748b')
-        .attr('stroke-width', (d: any) => Math.sqrt(d.similarity * 3) + 1);
-
-      // Reset all labels to default styling
-      labels.style('opacity', 0.9);
-    }
-
-    // Background click to deselect
-    function handleBackgroundClick(event: any) {
-      if (event.target === svg.node()) {
-        currentlySelectedNodeId = null;
-        onNodeClick(null as any);
-        resetAllSelectionStyling();
-      }
-    }
-
-    // Node hover handlers - only for visual feedback during hover
+    // Node hover handlers
     function handleNodeMouseOver(event: MouseEvent, d: GraphNode) {
-      // Only apply hover effects if this node is not currently selected
-      if (d.id !== currentlySelectedNodeId) {
-        // Enlarge node
+      if (d.id !== selectedNodeId) {
         d3.select(event.currentTarget as SVGCircleElement)
           .transition()
           .duration(200)
           .attr('r', (d.size || 8) * 1.3)
           .attr('stroke-width', 3);
 
-        // Highlight connections during hover (only if no node is selected)
-        if (!currentlySelectedNodeId) {
+        if (!selectedNodeId) {
           highlightConnections(d, '#fbbf24', true);
         }
       }
     }
 
     function handleNodeMouseOut(event: MouseEvent, d: GraphNode) {
-      // Only reset hover effects if this node is not currently selected
-      if (d.id !== currentlySelectedNodeId) {
-        // Reset node size
+      if (d.id !== selectedNodeId) {
         d3.select(event.currentTarget as SVGCircleElement)
           .transition()
           .duration(200)
           .attr('r', d.size || 8)
           .attr('stroke-width', 2);
 
-        // Reset highlights only if no node is selected
-        if (!currentlySelectedNodeId) {
+        if (!selectedNodeId) {
           resetHighlights();
         }
       }
@@ -298,20 +282,16 @@ export default function GraphVisualization({
     // Enhanced highlight connections function
     function highlightConnections(node: GraphNode, highlightColor: string = '#fbbf24', isHover: boolean = false) {
       const connectedIds = new Set<string>();
-
-      // Helper function to get ID from link source/target (handles both string IDs and node objects)
       const getLinkId = (sourceOrTarget: any): string => {
         return typeof sourceOrTarget === 'string' ? sourceOrTarget : sourceOrTarget.id;
       };
 
-      // Find connected links and IDs
       const isConnectedLink = (link: any) => {
         const sourceId = getLinkId(link.source);
         const targetId = getLinkId(link.target);
         return sourceId === node.id || targetId === node.id;
       };
 
-      // Build set of connected node IDs
       graphData.links.forEach(link => {
         const sourceId = getLinkId(link.source);
         const targetId = getLinkId(link.target);
@@ -321,12 +301,10 @@ export default function GraphVisualization({
         }
       });
 
-      // Dim unconnected nodes
       nodes.style('opacity', n => 
         n.id === node.id || connectedIds.has(n.id) ? 1 : 0.3
       );
 
-      // Highlight connected links with bright color
       links
         .style('opacity', l => isConnectedLink(l) ? 1 : 0.1)
         .attr('stroke', l => isConnectedLink(l) ? highlightColor : '#64748b')
@@ -334,7 +312,6 @@ export default function GraphVisualization({
           isConnectedLink(l) ? Math.sqrt(l.similarity * 5) + 3 : Math.sqrt(l.similarity * 3) + 1
         );
 
-      // Dim unconnected labels
       labels.style('opacity', n => 
         n.id === node.id || connectedIds.has(n.id) ? 1 : 0.3
       );
@@ -352,7 +329,6 @@ export default function GraphVisualization({
 
     // Update positions on simulation tick
     simulation.on('tick', () => {
-      // Ensure all coordinates are valid before updating
       links
         .attr('x1', d => {
           const sourceX = (d.source as any).x;
@@ -380,17 +356,12 @@ export default function GraphVisualization({
         .attr('y', d => isNaN(d.y!) ? 0 : d.y!);
     });
 
-    // Clear selection on background click
-    svg.on('click', handleBackgroundClick);
-
-    // Apply initial selection styling if a node is already selected
-    if (selectedNodeId) {
-      const initialSelectedNode = graphData.nodes.find(n => n.id === selectedNodeId);
-      if (initialSelectedNode) {
-        currentlySelectedNodeId = selectedNodeId;
-        applySelectionStyling(initialSelectedNode);
+    // Background click to deselect
+    svg.on('click', function(event) {
+      if (event.target === svg.node()) {
+        onNodeClick(null as any);
       }
-    }
+    });
 
     setIsReady(true);
 
@@ -400,9 +371,7 @@ export default function GraphVisualization({
       simulationRef.current = null;
     };
 
-  }, [graphData, dimensions, onNodeClick]);
-
-  // Remove the separate selection effect since we'll handle it directly
+  }, [graphData, dimensions]); // Remove selectedNodeId from dependencies
 
   // Helper functions
   const getNodeColor = (node: GraphNode): string => {
@@ -465,7 +434,7 @@ export default function GraphVisualization({
           <div className="absolute top-4 right-4 bg-gray-800/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-gray-600">
             <div className="text-xs text-gray-300 space-y-1">
               <div className="text-white font-medium mb-2">Controls</div>
-              <div>• <strong>Click</strong> node to select & center</div>
+              <div>• <strong>Click</strong> node to select</div>
               <div>• <strong>Drag</strong> nodes to move</div>
               <div>• <strong>Scroll</strong> to zoom</div>
               <div>• <strong>Hover</strong> to highlight connections</div>
@@ -493,7 +462,7 @@ export default function GraphVisualization({
               <div className="text-xs text-blue-200">
                 <div className="text-blue-100 font-medium mb-1">Node Selected</div>
                 <div>Connections highlighted in <span className="text-green-400 font-bold">bright green</span></div>
-                <div>Click node again or background to deselect</div>
+                <div>Click another node or background to change selection</div>
               </div>
             </div>
           )}
