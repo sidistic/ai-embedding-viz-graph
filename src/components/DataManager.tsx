@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import { DataStats } from '@/types';
+import { DataStats, DataPoint } from '@/types';
 import FileUpload from './FileUpload';
 
 interface DataManagerProps {
@@ -32,7 +32,7 @@ export default function DataManager({
           <span className="bg-blue-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">1</span>
           Upload Data
         </h3>
-        <FileUpload onFileLoad={onDataLoad} />
+        <FileUpload onFileLoad={onDataLoad} onError={(error) => console.error(error)} />
         <div className="mt-3 text-sm text-gray-400 bg-gray-700 p-3 rounded">
           <div>Loaded: <span className="text-white font-medium">{stats.totalItems}</span> items</div>
           <div>Categories: <span className="text-white font-medium">{stats.categories.length}</span></div>
@@ -57,6 +57,9 @@ export default function DataManager({
           onChange={(e) => onApiKeyChange(e.target.value)}
           className="w-full p-3 bg-gray-700 text-white rounded border border-gray-600 placeholder-gray-400"
         />
+        <p className="text-xs text-gray-400 mt-2">
+          Required for generating embeddings
+        </p>
       </div>
 
       {/* Step 3: Generate Embeddings */}
@@ -88,6 +91,18 @@ export default function DataManager({
             >
               Export CSV
             </button>
+          </div>
+        )}
+
+        {/* Embedding Stats */}
+        {hasEmbeddings && (
+          <div className="mt-4 bg-gray-700 p-3 rounded text-sm">
+            <div className="text-white font-medium mb-2">Embedding Statistics</div>
+            <div className="space-y-1 text-gray-300">
+              <div>Total items: {stats.totalItems}</div>
+              <div>With embeddings: {stats.withEmbeddings}</div>
+              <div>Dimensions: {stats.embeddingDimensions}</div>
+            </div>
           </div>
         )}
       </div>

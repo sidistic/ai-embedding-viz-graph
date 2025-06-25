@@ -1,4 +1,3 @@
-// app-config.ts - Centralized configuration and service registry
 import { AppConfig } from '@/types';
 import { ConnectionStrategyService } from './connection-strategies';
 import { SearchStrategyService } from './search-strategies';

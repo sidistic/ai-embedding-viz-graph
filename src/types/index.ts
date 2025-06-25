@@ -7,7 +7,6 @@ export interface DataPoint {
   metadata?: Record<string, any>;
 }
 
-// Graph visualization types
 export interface GraphNode extends DataPoint {
   x?: number;
   y?: number;
@@ -30,7 +29,44 @@ export interface GraphData {
   links: GraphLink[];
 }
 
-// Search functionality types
+// Strategy Pattern Interfaces
+export interface ConnectionStrategy {
+  name: string;
+  description: string;
+  generateConnections(
+    nodes: GraphNode[], 
+    options?: ConnectionOptions
+  ): GraphLink[];
+}
+
+export interface SearchStrategy {
+  name: string;
+  description: string;
+  search(
+    nodes: GraphNode[], 
+    query: string, 
+    options?: SearchOptions
+  ): SearchResult[];
+}
+
+// Strategy Options
+export interface ConnectionOptions {
+  threshold?: number;
+  maxConnections?: number;
+  minSimilarity?: number;
+  categoryWeight?: number;
+  [key: string]: any;
+}
+
+export interface SearchOptions {
+  maxResults?: number;
+  includeMetadata?: boolean;
+  caseSensitive?: boolean;
+  searchFields?: ('text' | 'category' | 'metadata')[];
+  [key: string]: any;
+}
+
+// Search types
 export interface SearchResult {
   node: GraphNode;
   score: number;
@@ -39,86 +75,21 @@ export interface SearchResult {
   highlights?: string[];
 }
 
-export interface SearchOptions {
-  query: string;
-  maxResults?: number;
-  includeMetadata?: boolean;
-  caseSensitive?: boolean;
-  useSemanticSearch?: boolean;
-  semanticThreshold?: number;
-  searchFields?: ('text' | 'category' | 'metadata')[];
-}
-
 export interface SearchState {
   query: string;
   results: SearchResult[];
   isActive: boolean;
   highlightedNodes: Set<string>;
+  strategy: string;
 }
 
-// Embedding and processing types
-export interface EmbeddingJob {
-  id: string;
-  text: string;
-  status: 'pending' | 'processing' | 'completed' | 'error';
-  embedding?: number[];
-  error?: string;
-}
-
-export interface SimilarityPair {
-  id1: string;
-  id2: string;
-  similarity: number;
-}
-
-// Enhanced data processing types for large datasets
-export interface DataProcessingOptions {
-  chunkSize?: number;
-  skipValidation?: boolean;
-  enableStreaming?: boolean;
-  maxFileSize?: number; // in MB
-  supportedFormats?: string[];
-}
-
+// Processing types
 export interface ProcessingProgress {
   stage: 'loading' | 'parsing' | 'validating' | 'processing' | 'complete';
   progress: number;
   current: number;
   total: number;
   message: string;
-}
-
-// Configuration types
-export interface VisualizationConfig {
-  width: number;
-  height: number;
-  nodeSize: {
-    min: number;
-    max: number;
-  };
-  linkStrength: {
-    min: number;
-    max: number;
-  };
-  colors: {
-    [category: string]: string;
-  };
-  showLabels: boolean;
-  showLinks: boolean;
-  linkThreshold: number;
-  enableSearch: boolean;
-  searchHighlightColor: string;
-}
-
-// Connection strategy types
-export type ConnectionStrategy = 'top3' | 'top5' | 'top10' | 'threshold' | 'adaptive' | 'category_based';
-
-// File upload types
-export interface FileUploadResult {
-  data: DataPoint[];
-  hasEmbeddings: boolean;
-  errors?: string[];
-  stats?: DataStats;
 }
 
 export interface DataStats {
@@ -131,25 +102,34 @@ export interface DataStats {
   processingTime: number;
 }
 
-// Categories for sample datasets (expanded)
-export const AG_NEWS_CATEGORIES = {
-  1: 'World',
-  2: 'Sports', 
-  3: 'Business',
-  4: 'Sci/Tech'
-} as const;
+// Service Events
+export interface ServiceEvent<T = any> {
+  type: string;
+  data?: T;
+  timestamp: number;
+}
 
-export const REDDIT_CATEGORIES = {
-  'askreddit': 'Q&A',
-  'worldnews': 'World',
-  'technology': 'Technology',
-  'science': 'Science',
-  'politics': 'Politics'
-} as const;
+// Configuration
+export interface AppConfig {
+  defaultConnectionStrategy: string;
+  defaultSearchStrategy: string;
+  visualization: {
+    nodeSize: { min: number; max: number };
+    linkStrength: { min: number; max: number };
+    colors: Record<string, string>;
+  };
+}
 
+// Legacy types for backward compatibility
+export type ConnectionStrategyType = 'top3' | 'top5' | 'top10' | 'threshold' | 'adaptive' | 'category_based';
+export type ProgressCallback = (progress: number, status: string) => void;
+export type ErrorCallback = (error: string) => void;
+export type ProcessingCallback = (progress: ProcessingProgress) => void;
+
+// Constants
 export const CATEGORY_COLORS = {
   'World': '#ef4444',
-  'Sports': '#3b82f6',
+  'Sports': '#3b82f6', 
   'Business': '#10b981',
   'Sci/Tech': '#f59e0b',
   'Technology': '#f59e0b',
@@ -158,8 +138,3 @@ export const CATEGORY_COLORS = {
   'Politics': '#f97316',
   'default': '#6b7280'
 } as const;
-
-// Utility types
-export type ProgressCallback = (progress: number, status: string) => void;
-export type ErrorCallback = (error: string) => void;
-export type ProcessingCallback = (progress: ProcessingProgress) => void;
