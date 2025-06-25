@@ -1,29 +1,40 @@
 'use client';
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 import * as d3 from 'd3';
-import { GraphData, GraphNode, GraphLink, DataPoint, CATEGORY_COLORS } from '@/types';
+import { GraphData, GraphNode, GraphLink, DataPoint, CATEGORY_COLORS, SearchResult } from '@/types';
 
 interface GraphVisualizationProps {
   graphData: GraphData;
   onNodeClick: (node: DataPoint) => void;
   onNodeHover: (node: DataPoint | null) => void;
   selectedNodeId?: string | null;
+  searchResults?: SearchResult[];
+  searchHighlightColor?: string;
 }
 
 export default function GraphVisualization({
   graphData,
   onNodeClick,
   onNodeHover,
-  selectedNodeId
+  selectedNodeId,
+  searchResults = [],
+  searchHighlightColor = '#ff6b35'
 }: GraphVisualizationProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const simulationRef = useRef<d3.Simulation<GraphNode, GraphLink> | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [isReady, setIsReady] = useState(false);
+  
+  // Refs for D3 selections
   const nodesRef = useRef<d3.Selection<SVGCircleElement, GraphNode, SVGGElement, unknown> | null>(null);
   const linksRef = useRef<d3.Selection<SVGLineElement, GraphLink, SVGGElement, unknown> | null>(null);
   const labelsRef = useRef<d3.Selection<SVGTextElement, GraphNode, SVGGElement, unknown> | null>(null);
+  const searchHighlightsRef = useRef<d3.Selection<SVGCircleElement, GraphNode, SVGGElement, unknown> | null>(null);
+
+  // Get search result node IDs for quick lookup
+  const searchResultIds = new Set(searchResults.map(r => r.node.id));
+  const hasSearchResults = searchResults.length > 0;
 
   // Update dimensions on resize
   const updateDimensions = useCallback(() => {
@@ -49,31 +60,44 @@ export default function GraphVisualization({
     return () => resizeObserver.disconnect();
   }, [updateDimensions]);
 
-  // Separate effect for handling selection changes
+  // Handle search highlighting
   useEffect(() => {
     if (!nodesRef.current || !linksRef.current || !labelsRef.current) return;
 
     const nodes = nodesRef.current;
     const links = linksRef.current;
     const labels = labelsRef.current;
+    const searchHighlights = searchHighlightsRef.current;
 
-    // Helper function to get ID from link source/target
-    const getLinkId = (sourceOrTarget: any): string => {
-      return typeof sourceOrTarget === 'string' ? sourceOrTarget : sourceOrTarget.id;
-    };
+    if (hasSearchResults) {
+      // Apply search highlighting
+      nodes
+        .style('opacity', (n: any) => searchResultIds.has(n.id) ? 1 : 0.3)
+        .attr('stroke-width', (n: any) => searchResultIds.has(n.id) ? 3 : 2);
 
-    if (selectedNodeId) {
+      links.style('opacity', 0.2);
+      labels.style('opacity', (n: any) => searchResultIds.has(n.id) ? 1 : 0.3);
+
+      // Update search highlights
+      if (searchHighlights) {
+        searchHighlights
+          .style('opacity', (n: any) => searchResultIds.has(n.id) ? 0.8 : 0);
+      }
+    } else if (selectedNodeId) {
+      // Apply selection highlighting (existing logic)
       const selectedNode = graphData.nodes.find(n => n.id === selectedNodeId);
       if (selectedNode) {
-        // Find connected nodes and links
         const connectedIds = new Set<string>();
+        const getLinkId = (sourceOrTarget: any): string => {
+          return typeof sourceOrTarget === 'string' ? sourceOrTarget : sourceOrTarget.id;
+        };
+
         const isConnectedLink = (link: any) => {
           const sourceId = getLinkId(link.source);
           const targetId = getLinkId(link.target);
           return sourceId === selectedNode.id || targetId === selectedNode.id;
         };
 
-        // Build set of connected node IDs
         graphData.links.forEach(link => {
           const sourceId = getLinkId(link.source);
           const targetId = getLinkId(link.target);
@@ -83,7 +107,6 @@ export default function GraphVisualization({
           }
         });
 
-        // Apply selection styling
         nodes
           .attr('stroke', (n: any) => n.id === selectedNode.id ? '#fbbf24' : '#ffffff')
           .attr('stroke-width', (n: any) => n.id === selectedNode.id ? 4 : 2)
@@ -101,6 +124,10 @@ export default function GraphVisualization({
         labels.style('opacity', (n: any) => 
           n.id === selectedNode.id || connectedIds.has(n.id) ? 1 : 0.3
         );
+
+        if (searchHighlights) {
+          searchHighlights.style('opacity', 0);
+        }
       }
     } else {
       // Reset all styling
@@ -115,10 +142,14 @@ export default function GraphVisualization({
         .attr('stroke-width', (d: any) => Math.sqrt(d.similarity * 3) + 1);
 
       labels.style('opacity', 0.9);
-    }
-  }, [selectedNodeId, graphData]);
 
-  // Main visualization effect - only recreate when graphData or dimensions change
+      if (searchHighlights) {
+        searchHighlights.style('opacity', 0);
+      }
+    }
+  }, [selectedNodeId, searchResults, hasSearchResults, searchResultIds, graphData]);
+
+  // Main visualization effect
   useEffect(() => {
     if (!svgRef.current || !graphData.nodes.length) {
       setIsReady(false);
@@ -150,6 +181,7 @@ export default function GraphVisualization({
 
     // Create groups for layers (order matters for rendering)
     const linksGroup = container.append('g').attr('class', 'links');
+    const searchHighlightGroup = container.append('g').attr('class', 'search-highlights');
     const nodesGroup = container.append('g').attr('class', 'nodes');
     const labelsGroup = container.append('g').attr('class', 'labels');
 
@@ -185,6 +217,23 @@ export default function GraphVisualization({
       .style('pointer-events', 'none');
 
     linksRef.current = links;
+
+    // Create search highlight rings (behind nodes)
+    const searchHighlights = searchHighlightGroup
+      .selectAll('circle')
+      .data(graphData.nodes)
+      .enter()
+      .append('circle')
+      .attr('class', 'search-highlight')
+      .attr('r', d => (d.size || 8) + 6)
+      .attr('fill', 'none')
+      .attr('stroke', searchHighlightColor)
+      .attr('stroke-width', 3)
+      .style('opacity', 0)
+      .style('pointer-events', 'none')
+      .style('filter', `drop-shadow(0px 0px 8px ${searchHighlightColor})`);
+
+    searchHighlightsRef.current = searchHighlights;
 
     // Create nodes
     const nodes = nodesGroup
@@ -244,43 +293,40 @@ export default function GraphVisualization({
 
     nodes.call(drag);
 
-    // Node click handler
+    // Node event handlers
     function handleNodeClick(event: MouseEvent, d: GraphNode) {
       event.stopPropagation();
       onNodeClick(d);
     }
 
-    // Node hover handlers
     function handleNodeMouseOver(event: MouseEvent, d: GraphNode) {
-      if (d.id !== selectedNodeId) {
+      if (d.id !== selectedNodeId && !hasSearchResults) {
         d3.select(event.currentTarget as SVGCircleElement)
           .transition()
           .duration(200)
           .attr('r', (d.size || 8) * 1.3)
           .attr('stroke-width', 3);
 
-        if (!selectedNodeId) {
-          highlightConnections(d, '#fbbf24', true);
-        }
+        highlightConnections(d, '#fbbf24', true);
       }
     }
 
     function handleNodeMouseOut(event: MouseEvent, d: GraphNode) {
-      if (d.id !== selectedNodeId) {
+      if (d.id !== selectedNodeId && !hasSearchResults) {
         d3.select(event.currentTarget as SVGCircleElement)
           .transition()
           .duration(200)
           .attr('r', d.size || 8)
           .attr('stroke-width', 2);
 
-        if (!selectedNodeId) {
-          resetHighlights();
-        }
+        resetHighlights();
       }
     }
 
     // Enhanced highlight connections function
     function highlightConnections(node: GraphNode, highlightColor: string = '#fbbf24', isHover: boolean = false) {
+      if (hasSearchResults) return; // Don't override search highlighting
+
       const connectedIds = new Set<string>();
       const getLinkId = (sourceOrTarget: any): string => {
         return typeof sourceOrTarget === 'string' ? sourceOrTarget : sourceOrTarget.id;
@@ -319,6 +365,8 @@ export default function GraphVisualization({
 
     // Reset highlights function
     function resetHighlights() {
+      if (hasSearchResults) return; // Don't override search highlighting
+
       nodes.style('opacity', 1);
       links
         .style('opacity', 0.6)
@@ -351,6 +399,10 @@ export default function GraphVisualization({
         .attr('cx', d => isNaN(d.x!) ? 0 : d.x!)
         .attr('cy', d => isNaN(d.y!) ? 0 : d.y!);
 
+      searchHighlights
+        .attr('cx', d => isNaN(d.x!) ? 0 : d.x!)
+        .attr('cy', d => isNaN(d.y!) ? 0 : d.y!);
+
       labels
         .attr('x', d => isNaN(d.x!) ? 0 : d.x!)
         .attr('y', d => isNaN(d.y!) ? 0 : d.y!);
@@ -371,7 +423,7 @@ export default function GraphVisualization({
       simulationRef.current = null;
     };
 
-  }, [graphData, dimensions]); // Remove selectedNodeId from dependencies
+  }, [graphData, dimensions]);
 
   // Helper functions
   const getNodeColor = (node: GraphNode): string => {
@@ -409,9 +461,10 @@ export default function GraphVisualization({
         style={{ background: '#1e293b' }}
       />
       
-      {/* Legend */}
+      {/* Enhanced UI overlays */}
       {isReady && (
         <>
+          {/* Legend */}
           <div className="absolute top-4 left-4 bg-gray-800/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-gray-600 max-w-xs">
             <h4 className="font-semibold text-sm mb-2 text-white">Categories</h4>
             <div className="space-y-1">
@@ -430,8 +483,27 @@ export default function GraphVisualization({
             </div>
           </div>
 
+          {/* Search Results Indicator */}
+          {hasSearchResults && (
+            <div className="absolute top-4 right-4 bg-orange-800/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-orange-600">
+              <div className="text-xs text-orange-200">
+                <div className="text-orange-100 font-medium mb-1">
+                  🔍 Search Results ({searchResults.length})
+                </div>
+                <div>Highlighted nodes match your search</div>
+                <div className="flex items-center gap-1 mt-1">
+                  <div 
+                    className="w-2 h-2 rounded-full border"
+                    style={{ borderColor: searchHighlightColor }}
+                  />
+                  <span>Search highlight</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Controls */}
-          <div className="absolute top-4 right-4 bg-gray-800/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-gray-600">
+          <div className="absolute bottom-4 left-4 bg-gray-800/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-gray-600">
             <div className="text-xs text-gray-300 space-y-1">
               <div className="text-white font-medium mb-2">Controls</div>
               <div>• <strong>Click</strong> node to select</div>
@@ -441,8 +513,8 @@ export default function GraphVisualization({
             </div>
           </div>
 
-          {/* Stats */}
-          <div className="absolute bottom-4 left-4 bg-gray-800/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-gray-600">
+          {/* Enhanced Stats */}
+          <div className="absolute bottom-4 right-4 bg-gray-800/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-gray-600">
             <div className="text-xs text-gray-300 space-y-1">
               <div className="text-white font-medium mb-1">Graph Statistics</div>
               <div>Nodes: <span className="text-white font-medium">{graphData.nodes.length}</span></div>
@@ -453,12 +525,17 @@ export default function GraphVisualization({
                   : '0'
                 }
               </span></div>
+              {hasSearchResults && (
+                <div className="pt-1 border-t border-gray-600">
+                  <div>Search results: <span className="text-orange-400 font-medium">{searchResults.length}</span></div>
+                </div>
+              )}
             </div>
           </div>
 
           {/* Selected node indicator */}
-          {selectedNodeId && (
-            <div className="absolute bottom-4 right-4 bg-blue-800/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-blue-600">
+          {selectedNodeId && !hasSearchResults && (
+            <div className="absolute top-1/2 right-4 bg-blue-800/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-blue-600 transform -translate-y-1/2">
               <div className="text-xs text-blue-200">
                 <div className="text-blue-100 font-medium mb-1">Node Selected</div>
                 <div>Connections highlighted in <span className="text-green-400 font-bold">bright green</span></div>

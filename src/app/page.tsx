@@ -1,34 +1,100 @@
 'use client';
-import React, { useState, useCallback } from 'react';
-import { DataPoint, GraphData } from '@/types';
+import React, { useState, useCallback, useMemo } from 'react';
+import { DataPoint, GraphData, SearchResult, SearchState, ConnectionStrategy, ProcessingProgress } from '@/types';
 import { DataProcessor } from '@/lib/dataProcessor';
 import { EmbeddingService } from '@/lib/embeddingService';
 import GraphVisualization from '@/components/visualization/GraphVisualization';
+import SearchComponent from '@/components/SearchComponent';
 import FileUpload from '@/components/FileUpload';
 
 export default function Home() {
+  // Core data state
   const [dataPoints, setDataPoints] = useState<DataPoint[]>([]);
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
   const [selectedNode, setSelectedNode] = useState<DataPoint | null>(null);
+  
+  // Search state
+  const [searchState, setSearchState] = useState<SearchState>({
+    query: '',
+    results: [],
+    isActive: false,
+    highlightedNodes: new Set()
+  });
+
+  // API and processing state
   const [apiKey, setApiKey] = useState('');
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
-  const [connectionStrategy, setConnectionStrategy] = useState<'top3' | 'top5' | 'threshold'>('top5');
-  const [similarityThreshold, setSimilarityThreshold] = useState(0.7);
+  
+  // Processing state for large datasets
+  const [processingProgress, setProcessingProgress] = useState<ProcessingProgress | null>(null);
 
-  const handleFileLoad = useCallback((data: DataPoint[]) => {
-    setDataPoints(data);
-    setError('');
-    
-    // Generate graph if embeddings exist
-    if (data.some(d => d.embedding)) {
-      const graph = DataProcessor.generateGraph(data, connectionStrategy, similarityThreshold);
-      setGraphData(graph);
+  // Graph configuration
+  const [connectionStrategy, setConnectionStrategy] = useState<ConnectionStrategy>('adaptive');
+  const [similarityThreshold, setSimilarityThreshold] = useState(0.7);
+  const [showLabels, setShowLabels] = useState(true);
+  const [showLinks, setShowLinks] = useState(true);
+
+  // Enhanced file loading with progress tracking
+  const handleFileLoad = useCallback(async (data: DataPoint[]) => {
+    try {
+      setError('');
+      setProcessingProgress({
+        stage: 'loading',
+        progress: 0,
+        current: 0,
+        total: data.length,
+        message: 'Processing uploaded data...'
+      });
+
+      // Process data in chunks for large datasets
+      const processedData = await new Promise<DataPoint[]>((resolve) => {
+        setTimeout(() => {
+          setProcessingProgress({
+            stage: 'validating',
+            progress: 50,
+            current: data.length / 2,
+            total: data.length,
+            message: 'Validating data format...'
+          });
+
+          // Validate and clean data
+          const validData = data.filter(point => point.text && point.text.length > 0);
+          
+          setProcessingProgress({
+            stage: 'complete',
+            progress: 100,
+            current: validData.length,
+            total: validData.length,
+            message: `Successfully loaded ${validData.length} items`
+          });
+
+          resolve(validData);
+        }, 100);
+      });
+
+      setDataPoints(processedData);
+      
+      // Generate graph if embeddings exist
+      if (processedData.some(d => d.embedding)) {
+        const graph = DataProcessor.generateGraph(processedData, connectionStrategy, similarityThreshold);
+        setGraphData(graph);
+      }
+
+      // Log statistics
+      const stats = DataProcessor.getDataStats(processedData);
+      console.log('Dataset loaded:', stats);
+
+    } catch (err: any) {
+      setError(`Failed to process data: ${err.message}`);
+    } finally {
+      setProcessingProgress(null);
     }
   }, [connectionStrategy, similarityThreshold]);
 
+  // Enhanced embedding generation with better progress tracking
   const generateEmbeddings = async () => {
     if (!apiKey) {
       setError('Please enter OpenAI API key');
@@ -45,17 +111,34 @@ export default function Home() {
       setError('');
       
       const service = new EmbeddingService(apiKey);
-      const texts = dataPoints.map(d => d.text);
       
-      const embeddings = await service.generateEmbeddings(texts, (prog, stat) => {
-        setProgress(prog);
-        setStatus(stat);
-      });
+      // Estimate cost for large datasets
+      const costEstimate = await service.estimateCost(
+        dataPoints.length,
+        dataPoints.slice(0, 10).map(d => d.text)
+      );
 
-      const updatedData = dataPoints.map((point, index) => ({
-        ...point,
-        embedding: embeddings[index]
-      }));
+      // Warn user about cost for large datasets
+      if (dataPoints.length > 1000) {
+        const confirmed = window.confirm(
+          `You're about to generate embeddings for ${dataPoints.length} items.\n` +
+          `Estimated cost: $${costEstimate.cost.toFixed(4)}\n` +
+          `This may take several minutes. Continue?`
+        );
+        
+        if (!confirmed) {
+          setLoading(false);
+          return;
+        }
+      }
+
+      const updatedData = await service.processDataPointsWithEmbeddings(
+        dataPoints,
+        (prog: ProcessingProgress) => {
+          setProgress(prog.progress);
+          setStatus(prog.message);
+        }
+      );
 
       setDataPoints(updatedData);
       
@@ -71,69 +154,120 @@ export default function Home() {
     }
   };
 
-  const downloadEmbeddings = () => {
-    const dataWithEmbeddings = dataPoints.filter(d => d.embedding);
-    if (dataWithEmbeddings.length === 0) {
-      setError('No embeddings to download');
-      return;
-    }
+  // Search functionality
+  const handleSearchResults = useCallback((results: SearchResult[]) => {
+    setSearchState(prev => ({
+      ...prev,
+      results,
+      isActive: results.length > 0,
+      highlightedNodes: new Set(results.map(r => r.node.id))
+    }));
 
-    const blob = new Blob([JSON.stringify(dataWithEmbeddings, null, 2)], {
-      type: 'application/json'
+    // If we have search results, clear node selection to avoid conflicts
+    if (results.length > 0) {
+      setSelectedNode(null);
+    }
+  }, []);
+
+  const handleClearSearch = useCallback(() => {
+    setSearchState({
+      query: '',
+      results: [],
+      isActive: false,
+      highlightedNodes: new Set()
     });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `embeddings_${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  }, []);
 
-  const regenerateGraph = () => {
+  // Enhanced graph regeneration
+  const regenerateGraph = useCallback(() => {
     if (dataPoints.some(d => d.embedding)) {
-      const graph = DataProcessor.generateGraph(dataPoints, connectionStrategy, similarityThreshold);
-      setGraphData(graph);
+      try {
+        const graph = DataProcessor.generateGraph(dataPoints, connectionStrategy, similarityThreshold);
+        setGraphData(graph);
+        
+        // Clear search if active
+        if (searchState.isActive) {
+          handleClearSearch();
+        }
+      } catch (err: any) {
+        setError(`Failed to regenerate graph: ${err.message}`);
+      }
     }
-  };
+  }, [dataPoints, connectionStrategy, similarityThreshold, searchState.isActive, handleClearSearch]);
 
-  const handleNodeClick = (node: DataPoint) => {
+  // Node interaction handlers
+  const handleNodeClick = useCallback((node: DataPoint | null) => {
     setSelectedNode(node);
-  };
+    
+    // Clear search highlighting when selecting a node
+    if (node && searchState.isActive) {
+      handleClearSearch();
+    }
+  }, [searchState.isActive, handleClearSearch]);
 
-  // Dummy function to satisfy the interface but not used for reading
-  const handleNodeHover = (node: DataPoint | null) => {
-    // This function is required by the interface but we don't use it for reading anymore
-    // Only used internally in GraphVisualization for visual feedback
-  };
+  const handleNodeHover = useCallback((node: DataPoint | null) => {
+    // This function is required by the interface but we use it for internal hover effects
+  }, []);
 
-  const hasEmbeddings = dataPoints.some(d => d.embedding);
+  // Enhanced data export
+  const downloadData = useCallback((format: 'json' | 'csv' = 'json', includeEmbeddings = true) => {
+    try {
+      const filteredData = includeEmbeddings 
+        ? dataPoints.filter(d => d.embedding)
+        : dataPoints;
+        
+      if (filteredData.length === 0) {
+        setError(`No data ${includeEmbeddings ? 'with embeddings ' : ''}to download`);
+        return;
+      }
+
+      const content = DataProcessor.exportData(filteredData, format, includeEmbeddings);
+      const blob = new Blob([content], {
+        type: format === 'json' ? 'application/json' : 'text/csv'
+      });
+      
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `data_${includeEmbeddings ? 'with_embeddings_' : ''}${new Date().toISOString().split('T')[0]}.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setError(`Failed to export data: ${err.message}`);
+    }
+  }, [dataPoints]);
+
+  // Computed values
+  const hasEmbeddings = useMemo(() => dataPoints.some(d => d.embedding), [dataPoints]);
+  const stats = useMemo(() => DataProcessor.getDataStats(dataPoints), [dataPoints]);
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       <div className="container mx-auto p-4">
         <header className="mb-6">
           <h1 className="text-3xl font-bold text-white mb-2">
-            Data Visualization & Graph Analysis
+            Enhanced Data Visualization & Graph Analysis
           </h1>
           <p className="text-gray-300">
-            Upload data, generate embeddings, and explore connections through interactive graphs
+            Upload data, generate embeddings, search through content, and explore connections through interactive graphs
           </p>
         </header>
 
-        {/* Controls Section - Top */}
+        {/* Enhanced Controls Section */}
         <div className="mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             
             {/* File Upload */}
             <div className="bg-gray-800 p-4 rounded-lg border border-gray-700">
               <h3 className="text-lg font-semibold mb-3 text-white">1. Upload Data</h3>
               <FileUpload onFileLoad={handleFileLoad} onError={setError} />
               <div className="mt-2 text-sm text-gray-400">
-                Loaded: <span className="text-white font-medium">{dataPoints.length}</span> items
+                <div>Items: <span className="text-white font-medium">{stats.totalItems}</span></div>
+                <div>Categories: <span className="text-white font-medium">{stats.categories.length}</span></div>
                 {hasEmbeddings && (
-                  <span className="text-green-400 ml-2">
-                    ({dataPoints.filter(d => d.embedding).length} with embeddings)
-                  </span>
+                  <div className="text-green-400">
+                    Embeddings: {stats.withEmbeddings}/{stats.totalItems}
+                  </div>
                 )}
               </div>
             </div>
@@ -167,12 +301,20 @@ export default function Home() {
                 </button>
                 
                 {hasEmbeddings && (
-                  <button
-                    onClick={downloadEmbeddings}
-                    className="w-full p-2 bg-green-600 hover:bg-green-700 rounded transition-colors text-sm"
-                  >
-                    Download
-                  </button>
+                  <div className="grid grid-cols-2 gap-1">
+                    <button
+                      onClick={() => downloadData('json')}
+                      className="p-1 bg-green-600 hover:bg-green-700 rounded transition-colors text-xs"
+                    >
+                      JSON
+                    </button>
+                    <button
+                      onClick={() => downloadData('csv')}
+                      className="p-1 bg-green-600 hover:bg-green-700 rounded transition-colors text-xs"
+                    >
+                      CSV
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -195,20 +337,21 @@ export default function Home() {
               
               <div className="space-y-3">
                 <div>
-                  <label className="block text-sm text-gray-300 mb-1">
-                    Connection Strategy:
-                  </label>
+                  <label className="block text-sm text-gray-300 mb-1">Strategy:</label>
                   <select
                     value={connectionStrategy}
                     onChange={(e) => {
-                      setConnectionStrategy(e.target.value as any);
+                      setConnectionStrategy(e.target.value as ConnectionStrategy);
                       if (hasEmbeddings) regenerateGraph();
                     }}
                     className="w-full p-2 bg-gray-700 text-white rounded border border-gray-600 text-sm"
                   >
                     <option value="top3">Top 3</option>
                     <option value="top5">Top 5</option>
+                    <option value="top10">Top 10</option>
                     <option value="threshold">Threshold</option>
+                    <option value="adaptive">Adaptive</option>
+                    <option value="category_based">Category-based</option>
                   </select>
                 </div>
 
@@ -247,8 +390,38 @@ export default function Home() {
                 <div>Links: <span className="text-white">{graphData.links.length}</span></div>
               </div>
             </div>
+
+            {/* Search */}
+            <div className="bg-gray-800 p-4 rounded-lg border border-gray-700">
+              <SearchComponent
+                nodes={graphData.nodes}
+                onSearchResults={handleSearchResults}
+                onClearSearch={handleClearSearch}
+                disabled={graphData.nodes.length === 0}
+              />
+            </div>
           </div>
         </div>
+
+        {/* Processing Progress Display */}
+        {processingProgress && (
+          <div className="mb-4 bg-blue-900 p-4 rounded-lg border border-blue-700">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-blue-300 font-medium">
+                {processingProgress.message}
+              </p>
+              <span className="text-blue-200 text-sm">
+                {processingProgress.current}/{processingProgress.total}
+              </span>
+            </div>
+            <div className="bg-blue-800 rounded-full h-2">
+              <div 
+                className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${processingProgress.progress}%` }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Error Display */}
         {error && (
@@ -263,7 +436,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* Visualization Section - Bottom */}
+        {/* Main Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
           
           {/* Graph Visualization */}
@@ -275,6 +448,8 @@ export default function Home() {
                   onNodeClick={handleNodeClick}
                   onNodeHover={handleNodeHover}
                   selectedNodeId={selectedNode?.id || null}
+                  searchResults={searchState.results}
+                  searchHighlightColor="#ff6b35"
                 />
               ) : (
                 <div className="flex items-center justify-center h-full text-gray-400">
@@ -285,7 +460,7 @@ export default function Home() {
                       <p className="text-sm">
                         1. Upload a CSV/JSON file<br/>
                         2. Generate embeddings<br/>
-                        3. Click nodes to explore
+                        3. Search and explore nodes
                       </p>
                     </div>
                   </div>
@@ -294,10 +469,60 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Node Details Card */}
+          {/* Enhanced Side Panel */}
           <div className="lg:col-span-1">
             <div className="bg-gray-800 rounded-lg border border-gray-700 p-4" style={{ height: '70vh' }}>
-              {selectedNode ? (
+              {/* Search Results Priority Display */}
+              {searchState.isActive && searchState.results.length > 0 ? (
+                <div className="h-full flex flex-col">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-white">Search Results</h3>
+                    <button
+                      onClick={handleClearSearch}
+                      className="text-gray-400 hover:text-white transition-colors"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  
+                  <div className="flex-1 overflow-y-auto space-y-3">
+                    {searchState.results.map((result, index) => (
+                      <div
+                        key={result.node.id}
+                        className="p-3 bg-gray-700/50 rounded border border-gray-600 hover:bg-gray-700/70 transition-colors cursor-pointer"
+                        onClick={() => handleNodeClick(result.node)}
+                      >
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-white">
+                              #{index + 1}
+                            </span>
+                            {result.node.category && (
+                              <span className="px-2 py-0.5 bg-blue-600 text-blue-100 text-xs rounded">
+                                {result.node.category}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-xs text-gray-400">
+                            {(result.score * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                        
+                        <p className="text-sm text-gray-200 line-clamp-3" title={result.node.text}>
+                          {result.node.text}
+                        </p>
+                        
+                        {result.matchedText && (
+                          <p className="text-xs text-gray-400 mt-2 line-clamp-2">
+                            Match: {result.matchedText}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : selectedNode ? (
+                /* Node Details Display */
                 <div className="h-full flex flex-col">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-lg font-semibold text-white">Node Details</h3>
@@ -403,11 +628,12 @@ export default function Home() {
                   </div>
                 </div>
               ) : (
+                /* Default State */
                 <div className="h-full flex items-center justify-center text-gray-400">
                   <div className="text-center">
                     <div className="text-4xl mb-4">🎯</div>
-                    <p className="text-lg mb-2">No node selected</p>
-                    <p className="text-sm">Click on a node in the graph to view its details</p>
+                    <p className="text-lg mb-2">No selection</p>
+                    <p className="text-sm">Click on a node in the graph or search to view details</p>
                   </div>
                 </div>
               )}
