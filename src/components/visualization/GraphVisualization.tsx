@@ -300,6 +300,7 @@ export default function GraphVisualization({
     }
 
     function handleNodeMouseOver(event: MouseEvent, d: GraphNode) {
+      // Only apply hover effects if node is not selected and no search is active
       if (d.id !== selectedNodeId && !hasSearchResults) {
         d3.select(event.currentTarget as SVGCircleElement)
           .transition()
@@ -312,6 +313,7 @@ export default function GraphVisualization({
     }
 
     function handleNodeMouseOut(event: MouseEvent, d: GraphNode) {
+      // Reset the individual node's visual properties on mouse out (unless it's the selected node)
       if (d.id !== selectedNodeId && !hasSearchResults) {
         d3.select(event.currentTarget as SVGCircleElement)
           .transition()
@@ -319,13 +321,15 @@ export default function GraphVisualization({
           .attr('r', d.size || 8)
           .attr('stroke-width', 2);
 
+        // Only reset highlights if nothing is selected and no search is active
         resetHighlights();
       }
     }
 
     // Enhanced highlight connections function
     function highlightConnections(node: GraphNode, highlightColor: string = '#fbbf24', isHover: boolean = false) {
-      if (hasSearchResults) return; // Don't override search highlighting
+      // Don't override search highlighting OR selection highlighting
+      if (hasSearchResults || selectedNodeId) return;
 
       const connectedIds = new Set<string>();
       const getLinkId = (sourceOrTarget: any): string => {
@@ -365,7 +369,8 @@ export default function GraphVisualization({
 
     // Reset highlights function
     function resetHighlights() {
-      if (hasSearchResults) return; // Don't override search highlighting
+      // Don't override search highlighting OR selection highlighting
+      if (hasSearchResults || selectedNodeId) return;
 
       nodes.style('opacity', 1);
       links
