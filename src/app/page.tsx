@@ -35,6 +35,11 @@ export default function Home() {
   const [connectionStrategy, setConnectionStrategy] = useState<ConnectionStrategy>('adaptive');
   const [similarityThreshold, setSimilarityThreshold] = useState(0.7);
 
+  // Helper function to get ID from link source/target (handles both string and object cases)
+  const getLinkId = useCallback((sourceOrTarget: any): string => {
+    return typeof sourceOrTarget === 'string' ? sourceOrTarget : sourceOrTarget.id;
+  }, []);
+
   // Enhanced file loading with progress tracking
   const handleFileLoad = useCallback(async (data: DataPoint[]) => {
     try {
@@ -235,9 +240,36 @@ export default function Home() {
     }
   }, [dataPoints]);
 
+  // Get connected nodes for selected node (FIXED VERSION)
+  const getConnectedNodes = useCallback(() => {
+    if (!selectedNode || graphData.links.length === 0) {
+      return [];
+    }
+
+    const connectedLinks = graphData.links.filter(link => {
+      const sourceId = getLinkId(link.source);
+      const targetId = getLinkId(link.target);
+      return sourceId === selectedNode.id || targetId === selectedNode.id;
+    });
+
+    return connectedLinks.map(link => {
+      const sourceId = getLinkId(link.source);
+      const targetId = getLinkId(link.target);
+      const connectedNodeId = sourceId === selectedNode.id ? targetId : sourceId;
+      const connectedNode = graphData.nodes.find(n => n.id === connectedNodeId);
+      
+      return {
+        link,
+        connectedNode,
+        connectedNodeId
+      };
+    }).filter(item => item.connectedNode); // Filter out any null/undefined nodes
+  }, [selectedNode, graphData.links, graphData.nodes, getLinkId]);
+
   // Computed values
   const hasEmbeddings = useMemo(() => dataPoints.some(d => d.embedding), [dataPoints]);
   const stats = useMemo(() => DataProcessor.getDataStats(dataPoints), [dataPoints]);
+  const connectedNodes = useMemo(() => getConnectedNodes(), [getConnectedNodes]);
 
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col">
@@ -600,48 +632,46 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Connected Nodes */}
-                {graphData.links.length > 0 && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                      Connected Nodes ({
-                        graphData.links.filter(link => 
-                          link.source === selectedNode.id || link.target === selectedNode.id
-                        ).length
-                      })
-                    </label>
+                {/* Connected Nodes - FIXED VERSION */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Connected Nodes ({connectedNodes.length})
+                  </label>
+                  {connectedNodes.length > 0 ? (
                     <div className="space-y-2 max-h-48 overflow-y-auto">
-                      {graphData.links
-                        .filter(link => link.source === selectedNode.id || link.target === selectedNode.id)
-                        .slice(0, 10)
-                        .map((link, index) => {
-                          const connectedNodeId = link.source === selectedNode.id ? link.target : link.source;
-                          const connectedNode = graphData.nodes.find(n => n.id === connectedNodeId);
-                          return (
-                            <div 
-                              key={index} 
-                              className="text-xs bg-gray-700 p-3 rounded hover:bg-gray-600 cursor-pointer transition-colors"
-                              onClick={() => connectedNode && setSelectedNode(connectedNode)}
-                            >
-                              <div className="font-medium text-gray-200 mb-1">
-                                {connectedNode?.text.substring(0, 60)}...
-                              </div>
-                              <div className="flex justify-between items-center">
-                                <span className="text-gray-400">
-                                  Similarity: {link.similarity.toFixed(3)}
-                                </span>
-                                {connectedNode?.category && (
-                                  <span className="text-xs bg-gray-600 px-2 py-1 rounded">
-                                    {connectedNode.category}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
+                      {connectedNodes.slice(0, 10).map((item, index) => (
+                        <div 
+                          key={index} 
+                          className="text-xs bg-gray-700 p-3 rounded hover:bg-gray-600 cursor-pointer transition-colors"
+                          onClick={() => item.connectedNode && setSelectedNode(item.connectedNode)}
+                        >
+                          <div className="font-medium text-gray-200 mb-1">
+                            {item.connectedNode!.text.substring(0, 60)}...
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-400">
+                              Similarity: {item.link.similarity.toFixed(3)}
+                            </span>
+                            {item.connectedNode!.category && (
+                              <span className="text-xs bg-gray-600 px-2 py-1 rounded">
+                                {item.connectedNode!.category}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      {connectedNodes.length > 10 && (
+                        <div className="text-xs text-gray-400 p-2 text-center">
+                          ... and {connectedNodes.length - 10} more connections
+                        </div>
+                      )}
                     </div>
-                  </div>
-                )}
+                  ) : (
+                    <div className="text-xs text-gray-400 bg-gray-700 p-3 rounded">
+                      No connections found for this node.
+                    </div>
+                  )}
+                </div>
 
                 {/* Metadata */}
                 {selectedNode.metadata && Object.keys(selectedNode.metadata).length > 0 && (
