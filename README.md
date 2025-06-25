@@ -115,31 +115,6 @@ Embeddings cost with OpenAI's `text-embedding-3-small`:
 - **Full AG News**: ~$2.40 (120K articles)
 - **Estimation**: Built-in cost calculator before processing
 
-## Development Roadmap
-
-### Phase 1: Basic Visualization ✅
-- [x] Load sample data
-- [x] Generate embeddings
-- [x] Basic graph visualization
-- [x] Similarity calculations
-
-### Phase 2: Enhanced Interactions
-- [ ] Advanced filtering and search
-- [ ] Clustering algorithms (k-means, hierarchical)
-- [ ] Export/import functionality
-- [ ] Multiple dataset support
-
-### Phase 3: Performance & Scale
-- [ ] Embedding caching and persistence
-- [ ] Web Workers for heavy computations
-- [ ] Database integration
-- [ ] Batch processing for large datasets
-
-### Phase 4: Integration
-- [ ] Extract reusable components
-- [ ] Integrate with main AI Notes app
-- [ ] Real-time embedding generation
-- [ ] Advanced similarity metrics
 
 ## Technologies Used
 
@@ -191,14 +166,3 @@ async estimateCost(textCount: number): Promise<{ tokens: number; cost: number }>
 ## License
 
 MIT License - feel free to use this code in your own projects!
-
-## Next Steps
-
-Once you're satisfied with the visualization performance:
-
-1. **Extract Components**: Move reusable components to a shared library
-2. **Integrate**: Add graph visualization to your main AI Notes app
-3. **Scale**: Add database persistence and larger dataset support
-4. **Enhance**: Add more advanced ML features like clustering and topic modeling
-
-This project serves as a perfect testing ground for the graph visualization features before integrating them into your production note-taking application!
