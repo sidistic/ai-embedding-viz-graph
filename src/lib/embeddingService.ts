@@ -32,6 +32,7 @@ export class EmbeddingService {
   private readonly MAX_RETRIES = 3;
   private readonly RATE_LIMIT_DELAY = 200; // ms between requests
   private readonly MAX_CONCURRENT_REQUESTS = 3; // Parallel processing limit
+  private readonly MEMORY_THRESHOLD = 0.8; // 80% memory usage threshold
   
   // Session management for large datasets
   private currentSession: ProcessingSession | null = null;
@@ -154,7 +155,17 @@ export class EmbeddingService {
 
     } catch (error: any) {
       console.error('Embedding generation failed:', error);
-      throw new Error(`Embedding generation failed: ${error.message}`);
+      
+      // Handle specific error types
+      if (error.name === 'QuotaExceededError' || error.message.includes('memory')) {
+        throw new Error(`Out of memory: Dataset too large for browser. Try reducing file size or splitting into smaller files.`);
+      } else if (error.message.includes('Rate limit')) {
+        throw new Error(`OpenAI API rate limit exceeded. Please wait a moment and try again.`);
+      } else if (error.message.includes('API key')) {
+        throw new Error(`Invalid OpenAI API key. Please check your API key and try again.`);
+      } else {
+        throw new Error(`Embedding generation failed: ${error.message}`);
+      }
     } finally {
       this.currentSession = null;
     }
@@ -172,8 +183,11 @@ export class EmbeddingService {
     }
 
     const results: number[][] = new Array(texts.length);
-    const batches = this.createBatches(texts, this.MAX_BATCH_SIZE);
+    const optimalBatchSize = this.getOptimalBatchSize(texts.length);
+    const batches = this.createBatches(texts, optimalBatchSize);
     const totalBatches = batches.length;
+    
+    console.log(`Processing ${texts.length} texts in ${totalBatches} batches (batch size: ${optimalBatchSize})`);
     
     onProgress?.(0, 'Starting embedding generation...');
 
@@ -206,6 +220,9 @@ export class EmbeddingService {
             batchResults.forEach((embedding, localIndex) => {
               results[startIndex + localIndex] = embedding;
             });
+
+            // Check memory pressure after processing batch
+            await this.checkMemoryPressure();
 
             break; // Success!
 
@@ -514,5 +531,50 @@ export class EmbeddingService {
    */
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Monitor memory usage and adjust batch sizes accordingly
+   */
+  private getOptimalBatchSize(dataLength: number): number {
+    // Check if performance.memory is available (Chrome)
+    if ('memory' in performance) {
+      const memory = (performance as any).memory;
+      const memoryUsage = memory.usedJSHeapSize / memory.totalJSHeapSize;
+      
+      if (memoryUsage > this.MEMORY_THRESHOLD) {
+        // Reduce batch size if memory usage is high
+        return Math.max(10, Math.floor(this.MAX_BATCH_SIZE * 0.5));
+      }
+    }
+    
+    // Adjust batch size based on dataset size
+    if (dataLength > 10000) {
+      return Math.max(20, Math.floor(this.MAX_BATCH_SIZE * 0.6));
+    } else if (dataLength > 5000) {
+      return Math.max(30, Math.floor(this.MAX_BATCH_SIZE * 0.8));
+    }
+    
+    return this.MAX_BATCH_SIZE;
+  }
+
+  /**
+   * Check if we should pause processing due to memory pressure
+   */
+  private async checkMemoryPressure(): Promise<void> {
+    if ('memory' in performance) {
+      const memory = (performance as any).memory;
+      const memoryUsage = memory.usedJSHeapSize / memory.totalJSHeapSize;
+      
+      if (memoryUsage > 0.9) { // 90% memory usage
+        console.warn('High memory usage detected, pausing processing...');
+        // Force garbage collection if available
+        if (global.gc) {
+          global.gc();
+        }
+        // Wait for memory to clear
+        await this.delay(2000);
+      }
+    }
   }
 }

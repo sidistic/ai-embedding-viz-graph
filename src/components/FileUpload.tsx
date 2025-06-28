@@ -222,9 +222,12 @@ export default function FileUpload({ onFileLoad, onError, onProgress }: FileUplo
           <div>
             <span className="font-medium text-yellow-400">TXT:</span>
             <div className="ml-4 text-xs space-y-1">
-              <div>• Plain text file (one item per line)</div>
+              <div>• <strong>Auto-chunks large text files</strong> by paragraphs/sentences</div>
+              <div>• Intelligent chunking strategy detection (adaptive, semantic, fixed)</div>
+              <div>• Configurable chunk sizes (150-2000 characters) with overlap</div>
+              <div>• Preserves document structure and context</div>
               <div>• Lines starting with '#' are treated as categories</div>
-              <div>• Automatic paragraph detection</div>
+              <div>• Auto-detects content categories (Technology, Science, etc.)</div>
             </div>
           </div>
         </div>
@@ -260,14 +263,25 @@ export default function FileUpload({ onFileLoad, onError, onProgress }: FileUplo
       {/* Performance Tips */}
       <details className="bg-gray-700/30 rounded p-3">
         <summary className="text-sm text-gray-300 cursor-pointer hover:text-white">
-          💡 Performance Tips for Large Datasets
+          💡 Auto-Chunking & Performance Tips
         </summary>
-        <div className="mt-2 text-xs text-gray-400 space-y-1">
-          <div>• Files &gt;10MB: validation is skipped for faster processing</div>
-          <div>• Optimal batch size: 1000-5000 items per embedding generation</div>
-          <div>• Consider splitting very large files (&gt;100k items) for better performance</div>
-          <div>• Use CSV for faster parsing of structured data</div>
-          <div>• Pre-clean your data to remove empty or duplicate entries</div>
+        <div className="mt-2 text-xs text-gray-400 space-y-2">
+          <div className="text-yellow-300 font-medium">📝 Text File Auto-Chunking:</div>
+          <div className="ml-2 space-y-1">
+            <div>• Upload entire books, articles, or documents as single .txt files</div>
+            <div>• System automatically chunks by paragraphs, sentences, or semantic breaks</div>
+            <div>• Preserves context with configurable overlap between chunks</div>
+            <div>• Auto-detects content categories and optimal chunk sizes</div>
+          </div>
+          
+          <div className="text-blue-300 font-medium">⚡ Performance Optimization:</div>
+          <div className="ml-2 space-y-1">
+            <div>• Files &gt;10MB: validation skipped for faster processing</div>
+            <div>• Large files (&gt;100MB): automatic streaming with 64MB chunks</div>
+            <div>• Memory-efficient processing with garbage collection</div>
+            <div>• Adaptive batch sizes based on available memory</div>
+            <div>• Use TXT for raw text, CSV for structured data</div>
+          </div>
         </div>
       </details>
     </div>
@@ -300,80 +314,703 @@ export default function FileUpload({ onFileLoad, onError, onProgress }: FileUplo
   }
 }
 
-// Utility function to read file content
+// Utility function to read file content with streaming for large files
 function readFileContent(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
+    // For very large files, use streaming approach
+    if (file.size > 100 * 1024 * 1024) { // 100MB threshold
+      readFileInChunks(file)
+        .then(resolve)
+        .catch(reject);
+      return;
+    }
+
+    // Standard approach for smaller files
     const reader = new FileReader();
     reader.onload = (e) => {
-      const content = e.target?.result as string;
-      resolve(content);
+      try {
+        const content = e.target?.result as string;
+        if (!content) {
+          reject(new Error('File content is empty'));
+          return;
+        }
+        resolve(content);
+      } catch (error) {
+        reject(new Error('Failed to process file content'));
+      }
     };
     reader.onerror = () => {
-      reject(new Error('Failed to read file'));
+      reject(new Error('Failed to read file - file may be corrupted or too large'));
     };
-    reader.readAsText(file);
+    reader.onabort = () => {
+      reject(new Error('File reading was aborted'));
+    };
+    
+    try {
+      reader.readAsText(file);
+    } catch (error) {
+      reject(new Error('Failed to start file reading - file may be too large for browser memory'));
+    }
   });
 }
 
-// Process plain text files
+// Stream large files in chunks to avoid memory issues
+async function readFileInChunks(file: File): Promise<string> {
+  const chunkSize = 64 * 1024 * 1024; // 64MB chunks
+  const chunks: string[] = [];
+  let offset = 0;
+
+  while (offset < file.size) {
+    const slice = file.slice(offset, offset + chunkSize);
+    const chunk = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target?.result as string || '');
+      reader.onerror = () => reject(new Error('Failed to read file chunk'));
+      reader.readAsText(slice);
+    });
+    
+    chunks.push(chunk);
+    offset += chunkSize;
+    
+    // Allow other tasks to run
+    await new Promise(resolve => setTimeout(resolve, 1));
+  }
+
+  return chunks.join('');
+}
+
+// Enhanced text chunking interface
+interface ChunkingOptions {
+  strategy: 'sentence' | 'paragraph' | 'semantic' | 'fixed' | 'adaptive';
+  maxChunkSize: number;
+  minChunkSize: number;
+  overlap: number;
+  preserveStructure: boolean;
+}
+
+// Process plain text files with intelligent auto-chunking
 async function processTxtFile(
   content: string,
   onProgress?: (progress: ProcessingProgress) => void
 ): Promise<DataPoint[]> {
-  const lines = content.split('\n').filter(line => line.trim().length > 0);
-  const dataPoints: DataPoint[] = [];
-  let currentCategory = 'General';
+  onProgress?.({
+    stage: 'parsing',
+    progress: 10,
+    current: 0,
+    total: 1,
+    message: 'Analyzing text structure...'
+  });
+
+  // Auto-detect best chunking strategy
+  const chunkingOptions = detectOptimalChunking(content);
   
   onProgress?.({
     stage: 'parsing',
     progress: 20,
     current: 0,
-    total: lines.length,
-    message: 'Processing text lines...'
+    total: 1,
+    message: `Using ${chunkingOptions.strategy} chunking strategy...`
   });
 
-  lines.forEach((line, index) => {
-    const trimmedLine = line.trim();
-    
-    // Lines starting with # are categories
-    if (trimmedLine.startsWith('#')) {
-      currentCategory = trimmedLine.substring(1).trim();
-      return;
-    }
-    
-    // Skip very short lines
-    if (trimmedLine.length < 10) return;
-    
-    dataPoints.push({
-      id: `txt_${index + 1}`,
-      text: trimmedLine,
-      category: currentCategory,
-      metadata: {
-        lineNumber: index + 1,
-        source: 'txt_upload'
-      }
-    });
-
-    if (index % 100 === 0) {
-      onProgress?.({
-        stage: 'parsing',
-        progress: 20 + (index / lines.length) * 60,
-        current: index,
-        total: lines.length,
-        message: `Processed ${index}/${lines.length} lines...`
-      });
-    }
+  // Chunk the text based on detected strategy
+  const chunks = await chunkText(content, chunkingOptions, onProgress);
+  
+  onProgress?.({
+    stage: 'processing',
+    progress: 80,
+    current: chunks.length,
+    total: chunks.length,
+    message: `Created ${chunks.length} text chunks...`
   });
+
+  // Convert chunks to DataPoints
+  const dataPoints: DataPoint[] = chunks.map((chunk, index) => ({
+    id: `chunk_${index + 1}`,
+    text: chunk.text,
+    category: chunk.category || detectContentCategory(chunk.text),
+    metadata: {
+      chunkIndex: index + 1,
+      totalChunks: chunks.length,
+      chunkSize: chunk.text.length,
+      chunkStrategy: chunkingOptions.strategy,
+      startPosition: chunk.startPosition,
+      endPosition: chunk.endPosition,
+      source: 'txt_upload_chunked',
+      originalLength: content.length,
+      hasOverlap: chunk.hasOverlap || false
+    }
+  }));
 
   onProgress?.({
     stage: 'validating',
-    progress: 85,
+    progress: 95,
     current: dataPoints.length,
     total: dataPoints.length,
-    message: 'Validating processed data...'
+    message: 'Validating chunked data...'
   });
 
-  return dataPoints;
+  // Filter out chunks that are too short or empty
+  const validChunks = dataPoints.filter(chunk => 
+    chunk.text.trim().length >= chunkingOptions.minChunkSize
+  );
+
+  onProgress?.({
+    stage: 'complete',
+    progress: 100,
+    current: validChunks.length,
+    total: validChunks.length,
+    message: `Successfully created ${validChunks.length} text chunks`
+  });
+
+  return validChunks;
+}
+
+// Detect optimal chunking strategy based on text characteristics
+function detectOptimalChunking(content: string): ChunkingOptions {
+  const textLength = content.length;
+  const paragraphs = content.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+  const sentences = content.split(/[.!?]+/).filter(s => s.trim().length > 0);
+  const avgParagraphLength = paragraphs.length > 0 ? textLength / paragraphs.length : 0;
+  const avgSentenceLength = sentences.length > 0 ? textLength / sentences.length : 0;
+
+  console.log('Text analysis:', {
+    totalLength: textLength,
+    paragraphCount: paragraphs.length,
+    sentenceCount: sentences.length,
+    avgParagraphLength: Math.round(avgParagraphLength),
+    avgSentenceLength: Math.round(avgSentenceLength)
+  });
+
+  // Adaptive strategy selection
+  if (textLength < 10000) {
+    // Small texts: use paragraph chunking
+    return {
+      strategy: 'paragraph',
+      maxChunkSize: 2000,
+      minChunkSize: 100,
+      overlap: 100,
+      preserveStructure: true
+    };
+  } else if (avgParagraphLength > 500 && avgParagraphLength < 2000) {
+    // Well-structured documents: use paragraph chunking
+    return {
+      strategy: 'paragraph',
+      maxChunkSize: 1500,
+      minChunkSize: 200,
+      overlap: 150,
+      preserveStructure: true
+    };
+  } else if (avgSentenceLength > 50 && avgSentenceLength < 300) {
+    // Regular prose: use sentence-based chunking
+    return {
+      strategy: 'sentence',
+      maxChunkSize: 1200,
+      minChunkSize: 150,
+      overlap: 100,
+      preserveStructure: true
+    };
+  } else if (textLength > 100000) {
+    // Very large texts: use semantic chunking
+    return {
+      strategy: 'semantic',
+      maxChunkSize: 1000,
+      minChunkSize: 200,
+      overlap: 200,
+      preserveStructure: false
+    };
+  } else {
+    // Default: adaptive chunking
+    return {
+      strategy: 'adaptive',
+      maxChunkSize: 1000,
+      minChunkSize: 150,
+      overlap: 100,
+      preserveStructure: true
+    };
+  }
+}
+
+// Intelligent text chunking with multiple strategies
+async function chunkText(
+  content: string, 
+  options: ChunkingOptions,
+  onProgress?: (progress: ProcessingProgress) => void
+): Promise<Array<{
+  text: string;
+  category?: string;
+  startPosition: number;
+  endPosition: number;
+  hasOverlap?: boolean;
+}>> {
+  const chunks: Array<{
+    text: string;
+    category?: string;
+    startPosition: number;
+    endPosition: number;
+    hasOverlap?: boolean;
+  }> = [];
+
+  let currentCategory = 'General';
+
+  switch (options.strategy) {
+    case 'paragraph':
+      return chunkByParagraphs(content, options, onProgress);
+    
+    case 'sentence':
+      return chunkBySentences(content, options, onProgress);
+    
+    case 'semantic':
+      return chunkBySemantic(content, options, onProgress);
+    
+    case 'fixed':
+      return chunkByFixedSize(content, options, onProgress);
+    
+    case 'adaptive':
+    default:
+      return chunkAdaptive(content, options, onProgress);
+  }
+}
+
+// Paragraph-based chunking
+async function chunkByParagraphs(
+  content: string, 
+  options: ChunkingOptions,
+  onProgress?: (progress: ProcessingProgress) => void
+): Promise<Array<{text: string; category?: string; startPosition: number; endPosition: number; hasOverlap?: boolean}>> {
+  const paragraphs = content.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+  const chunks: Array<{text: string; category?: string; startPosition: number; endPosition: number; hasOverlap?: boolean}> = [];
+  
+  let currentChunk = '';
+  let startPos = 0;
+  let currentCategory = 'General';
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    const paragraph = paragraphs[i].trim();
+    
+    // Check for category markers
+    const categoryMatch = paragraph.match(/^#\s*(.+)$/);
+    if (categoryMatch) {
+      currentCategory = categoryMatch[1].trim();
+      continue;
+    }
+
+    // Skip very short paragraphs
+    if (paragraph.length < 50) continue;
+
+    // If adding this paragraph would exceed max size, save current chunk
+    if (currentChunk.length + paragraph.length > options.maxChunkSize && currentChunk.length > 0) {
+      chunks.push({
+        text: currentChunk.trim(),
+        category: currentCategory,
+        startPosition: startPos,
+        endPosition: startPos + currentChunk.length,
+        hasOverlap: false
+      });
+      
+      // Handle overlap
+      if (options.overlap > 0) {
+        const overlapText = currentChunk.slice(-options.overlap);
+        currentChunk = overlapText + '\n\n' + paragraph;
+      } else {
+        currentChunk = paragraph;
+      }
+      startPos = content.indexOf(paragraph, startPos);
+    } else {
+      if (currentChunk.length > 0) {
+        currentChunk += '\n\n' + paragraph;
+      } else {
+        currentChunk = paragraph;
+        startPos = content.indexOf(paragraph, startPos);
+      }
+    }
+
+    // Progress update
+    if (i % 10 === 0) {
+      onProgress?.({
+        stage: 'processing',
+        progress: 30 + (i / paragraphs.length) * 40,
+        current: i,
+        total: paragraphs.length,
+        message: `Processing paragraph ${i + 1}/${paragraphs.length}...`
+      });
+      
+      // Allow UI to update
+      await new Promise(resolve => setTimeout(resolve, 1));
+    }
+  }
+
+  // Add final chunk
+  if (currentChunk.trim().length >= options.minChunkSize) {
+    chunks.push({
+      text: currentChunk.trim(),
+      category: currentCategory,
+      startPosition: startPos,
+      endPosition: startPos + currentChunk.length,
+      hasOverlap: false
+    });
+  }
+
+  return chunks;
+}
+
+// Sentence-based chunking
+async function chunkBySentences(
+  content: string, 
+  options: ChunkingOptions,
+  onProgress?: (progress: ProcessingProgress) => void
+): Promise<Array<{text: string; category?: string; startPosition: number; endPosition: number; hasOverlap?: boolean}>> {
+  // Advanced sentence splitting that handles abbreviations
+  const sentences = content.split(/(?<=[.!?])\s+(?=[A-Z])/).filter(s => s.trim().length > 0);
+  const chunks: Array<{text: string; category?: string; startPosition: number; endPosition: number; hasOverlap?: boolean}> = [];
+  
+  let currentChunk = '';
+  let startPos = 0;
+  let currentCategory = 'General';
+
+  for (let i = 0; i < sentences.length; i++) {
+    const sentence = sentences[i].trim();
+    
+    // Check for category markers
+    if (sentence.startsWith('#')) {
+      const categoryMatch = sentence.match(/^#\s*(.+)$/);
+      if (categoryMatch) {
+        currentCategory = categoryMatch[1].trim();
+        continue;
+      }
+    }
+
+    // If adding this sentence would exceed max size, save current chunk
+    if (currentChunk.length + sentence.length > options.maxChunkSize && currentChunk.length > 0) {
+      chunks.push({
+        text: currentChunk.trim(),
+        category: currentCategory,
+        startPosition: startPos,
+        endPosition: startPos + currentChunk.length,
+        hasOverlap: options.overlap > 0
+      });
+      
+      // Handle overlap
+      if (options.overlap > 0) {
+        const overlapText = currentChunk.slice(-options.overlap);
+        currentChunk = overlapText + ' ' + sentence;
+      } else {
+        currentChunk = sentence;
+      }
+      startPos = content.indexOf(sentence, startPos);
+    } else {
+      if (currentChunk.length > 0) {
+        currentChunk += ' ' + sentence;
+      } else {
+        currentChunk = sentence;
+        startPos = content.indexOf(sentence, startPos);
+      }
+    }
+
+    // Progress update
+    if (i % 50 === 0) {
+      onProgress?.({
+        stage: 'processing',
+        progress: 30 + (i / sentences.length) * 40,
+        current: i,
+        total: sentences.length,
+        message: `Processing sentence ${i + 1}/${sentences.length}...`
+      });
+      
+      await new Promise(resolve => setTimeout(resolve, 1));
+    }
+  }
+
+  // Add final chunk
+  if (currentChunk.trim().length >= options.minChunkSize) {
+    chunks.push({
+      text: currentChunk.trim(),
+      category: currentCategory,
+      startPosition: startPos,
+      endPosition: startPos + currentChunk.length,
+      hasOverlap: false
+    });
+  }
+
+  return chunks;
+}
+
+// Semantic chunking (topic-aware)
+async function chunkBySemantic(
+  content: string, 
+  options: ChunkingOptions,
+  onProgress?: (progress: ProcessingProgress) => void
+): Promise<Array<{text: string; category?: string; startPosition: number; endPosition: number; hasOverlap?: boolean}>> {
+  // Split by semantic breaks (double newlines, section headers, etc.)
+  const semanticBreaks = content.split(/(?:\n\s*\n|\n\s*#{1,6}\s|\n\s*-{3,}|\n\s*={3,})/);
+  const chunks: Array<{text: string; category?: string; startPosition: number; endPosition: number; hasOverlap?: boolean}> = [];
+  
+  let currentChunk = '';
+  let startPos = 0;
+  let currentCategory = 'General';
+
+  for (let i = 0; i < semanticBreaks.length; i++) {
+    const section = semanticBreaks[i].trim();
+    
+    if (section.length === 0) continue;
+
+    // Detect topic changes based on common patterns
+    const topicPattern = /^(chapter|section|part|\d+\.|\w+:)/i;
+    if (topicPattern.test(section) && currentChunk.length > options.minChunkSize) {
+      // Save current chunk before starting new topic
+      chunks.push({
+        text: currentChunk.trim(),
+        category: currentCategory,
+        startPosition: startPos,
+        endPosition: startPos + currentChunk.length,
+        hasOverlap: false
+      });
+      currentChunk = section;
+      startPos = content.indexOf(section, startPos);
+    } else if (currentChunk.length + section.length > options.maxChunkSize && currentChunk.length > 0) {
+      chunks.push({
+        text: currentChunk.trim(),
+        category: currentCategory,
+        startPosition: startPos,
+        endPosition: startPos + currentChunk.length,
+        hasOverlap: options.overlap > 0
+      });
+      
+      // Handle overlap
+      if (options.overlap > 0) {
+        const overlapText = currentChunk.slice(-options.overlap);
+        currentChunk = overlapText + '\n\n' + section;
+      } else {
+        currentChunk = section;
+      }
+      startPos = content.indexOf(section, startPos);
+    } else {
+      if (currentChunk.length > 0) {
+        currentChunk += '\n\n' + section;
+      } else {
+        currentChunk = section;
+        startPos = content.indexOf(section, startPos);
+      }
+    }
+
+    if (i % 20 === 0) {
+      onProgress?.({
+        stage: 'processing',
+        progress: 30 + (i / semanticBreaks.length) * 40,
+        current: i,
+        total: semanticBreaks.length,
+        message: `Processing semantic section ${i + 1}/${semanticBreaks.length}...`
+      });
+      
+      await new Promise(resolve => setTimeout(resolve, 1));
+    }
+  }
+
+  // Add final chunk
+  if (currentChunk.trim().length >= options.minChunkSize) {
+    chunks.push({
+      text: currentChunk.trim(),
+      category: currentCategory,
+      startPosition: startPos,
+      endPosition: startPos + currentChunk.length,
+      hasOverlap: false
+    });
+  }
+
+  return chunks;
+}
+
+// Fixed-size chunking with word boundaries
+async function chunkByFixedSize(
+  content: string, 
+  options: ChunkingOptions,
+  onProgress?: (progress: ProcessingProgress) => void
+): Promise<Array<{text: string; category?: string; startPosition: number; endPosition: number; hasOverlap?: boolean}>> {
+  const chunks: Array<{text: string; category?: string; startPosition: number; endPosition: number; hasOverlap?: boolean}> = [];
+  const words = content.split(/\s+/);
+  
+  let currentChunk = '';
+  let startPos = 0;
+  
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    
+    if (currentChunk.length + word.length + 1 > options.maxChunkSize && currentChunk.length > 0) {
+      chunks.push({
+        text: currentChunk.trim(),
+        category: detectContentCategory(currentChunk),
+        startPosition: startPos,
+        endPosition: startPos + currentChunk.length,
+        hasOverlap: options.overlap > 0
+      });
+      
+      // Handle overlap
+      if (options.overlap > 0) {
+        const overlapWords = currentChunk.split(/\s+/).slice(-Math.floor(options.overlap / 10));
+        currentChunk = overlapWords.join(' ') + ' ' + word;
+      } else {
+        currentChunk = word;
+      }
+      startPos = content.indexOf(currentChunk, startPos);
+    } else {
+      if (currentChunk.length > 0) {
+        currentChunk += ' ' + word;
+      } else {
+        currentChunk = word;
+        startPos = content.indexOf(word, startPos);
+      }
+    }
+
+    if (i % 1000 === 0) {
+      onProgress?.({
+        stage: 'processing',
+        progress: 30 + (i / words.length) * 40,
+        current: i,
+        total: words.length,
+        message: `Processing word ${i + 1}/${words.length}...`
+      });
+      
+      await new Promise(resolve => setTimeout(resolve, 1));
+    }
+  }
+
+  // Add final chunk
+  if (currentChunk.trim().length >= options.minChunkSize) {
+    chunks.push({
+      text: currentChunk.trim(),
+      category: detectContentCategory(currentChunk),
+      startPosition: startPos,
+      endPosition: startPos + currentChunk.length,
+      hasOverlap: false
+    });
+  }
+
+  return chunks;
+}
+
+// Adaptive chunking (combines multiple strategies)
+async function chunkAdaptive(
+  content: string, 
+  options: ChunkingOptions,
+  onProgress?: (progress: ProcessingProgress) => void
+): Promise<Array<{text: string; category?: string; startPosition: number; endPosition: number; hasOverlap?: boolean}>> {
+  // First try paragraph chunking, then sentence chunking for large paragraphs
+  const paragraphs = content.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+  const chunks: Array<{text: string; category?: string; startPosition: number; endPosition: number; hasOverlap?: boolean}> = [];
+  
+  let currentCategory = 'General';
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    const paragraph = paragraphs[i].trim();
+    
+    // Check for category markers
+    const categoryMatch = paragraph.match(/^#\s*(.+)$/);
+    if (categoryMatch) {
+      currentCategory = categoryMatch[1].trim();
+      continue;
+    }
+
+    if (paragraph.length <= options.maxChunkSize) {
+      // Paragraph fits in one chunk
+      if (paragraph.length >= options.minChunkSize) {
+        chunks.push({
+          text: paragraph,
+          category: currentCategory,
+          startPosition: content.indexOf(paragraph),
+          endPosition: content.indexOf(paragraph) + paragraph.length,
+          hasOverlap: false
+        });
+      }
+    } else {
+      // Paragraph is too large, split by sentences
+      const sentences = paragraph.split(/(?<=[.!?])\s+(?=[A-Z])/).filter(s => s.trim().length > 0);
+      let currentChunk = '';
+      let chunkStart = content.indexOf(paragraph);
+      
+      for (const sentence of sentences) {
+        if (currentChunk.length + sentence.length > options.maxChunkSize && currentChunk.length > 0) {
+          chunks.push({
+            text: currentChunk.trim(),
+            category: currentCategory,
+            startPosition: chunkStart,
+            endPosition: chunkStart + currentChunk.length,
+            hasOverlap: options.overlap > 0
+          });
+          
+          if (options.overlap > 0) {
+            const overlapText = currentChunk.slice(-options.overlap);
+            currentChunk = overlapText + ' ' + sentence;
+          } else {
+            currentChunk = sentence;
+          }
+          chunkStart = content.indexOf(sentence, chunkStart);
+        } else {
+          if (currentChunk.length > 0) {
+            currentChunk += ' ' + sentence;
+          } else {
+            currentChunk = sentence;
+            chunkStart = content.indexOf(sentence, chunkStart);
+          }
+        }
+      }
+      
+      // Add final chunk from this paragraph
+      if (currentChunk.trim().length >= options.minChunkSize) {
+        chunks.push({
+          text: currentChunk.trim(),
+          category: currentCategory,
+          startPosition: chunkStart,
+          endPosition: chunkStart + currentChunk.length,
+          hasOverlap: false
+        });
+      }
+    }
+
+    if (i % 10 === 0) {
+      onProgress?.({
+        stage: 'processing',
+        progress: 30 + (i / paragraphs.length) * 40,
+        current: i,
+        total: paragraphs.length,
+        message: `Processing paragraph ${i + 1}/${paragraphs.length}...`
+      });
+      
+      await new Promise(resolve => setTimeout(resolve, 1));
+    }
+  }
+
+  return chunks;
+}
+
+// Auto-detect content category based on keywords
+function detectContentCategory(text: string): string {
+  const lowerText = text.toLowerCase();
+  
+  // Define category keywords
+  const categories = {
+    'Technology': ['ai', 'artificial intelligence', 'machine learning', 'computer', 'software', 'algorithm', 'data', 'programming', 'code', 'digital', 'internet', 'tech'],
+    'Science': ['research', 'study', 'experiment', 'hypothesis', 'theory', 'scientific', 'analysis', 'discovery', 'evidence', 'methodology'],
+    'Business': ['company', 'market', 'financial', 'revenue', 'profit', 'business', 'corporate', 'economy', 'industry', 'commercial'],
+    'Health': ['health', 'medical', 'medicine', 'patient', 'treatment', 'disease', 'therapy', 'clinical', 'healthcare', 'wellness'],
+    'Education': ['education', 'learning', 'student', 'teacher', 'school', 'university', 'course', 'academic', 'knowledge', 'training'],
+    'News': ['news', 'report', 'according', 'source', 'announced', 'statement', 'breaking', 'update', 'journalist', 'media']
+  };
+  
+  let maxScore = 0;
+  let detectedCategory = 'General';
+  
+  for (const [category, keywords] of Object.entries(categories)) {
+    const score = keywords.reduce((count, keyword) => {
+      const matches = (lowerText.match(new RegExp(keyword, 'g')) || []).length;
+      return count + matches;
+    }, 0);
+    
+    if (score > maxScore) {
+      maxScore = score;
+      detectedCategory = category;
+    }
+  }
+  
+  return detectedCategory;
 }
 
 // Enhanced sample data generators

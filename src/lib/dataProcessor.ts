@@ -54,6 +54,13 @@ export class DataProcessor {
       const results: DataPoint[] = [];
       let processedRows = 0;
       let totalRows = 0;
+      let lastProgressUpdate = 0;
+      const progressThrottle = 500; // Throttle progress updates to every 500ms
+      
+      // Memory management for large datasets
+      const maxMemoryItems = 50000; // Process in chunks if larger
+      let currentChunk: DataPoint[] = [];
+      const chunks: DataPoint[][] = [];
 
       Papa.parse(csvContent, {
         header: true,
@@ -67,13 +74,26 @@ export class DataProcessor {
           try {
             const dataPoint = this.parseRowToDataPoint(row.data, processedRows);
             if (dataPoint.text && dataPoint.text.length > 0) {
-              results.push(dataPoint);
+              currentChunk.push(dataPoint);
+              
+              // Memory management: if chunk gets too large, move to chunks array
+              if (currentChunk.length >= maxMemoryItems) {
+                chunks.push([...currentChunk]);
+                currentChunk = []; // Clear current chunk to free memory
+                
+                // Force garbage collection hint
+                if (global.gc) {
+                  global.gc();
+                }
+              }
             }
             
             processedRows++;
 
-            // Update progress every chunk
-            if (processedRows % Math.max(1, Math.floor(chunkSize / 10)) === 0) {
+            // Throttled progress updates to prevent UI blocking
+            const now = Date.now();
+            if (now - lastProgressUpdate >= progressThrottle || processedRows % Math.max(1, Math.floor(chunkSize / 10)) === 0) {
+              lastProgressUpdate = now;
               onProgress?.({
                 stage: 'parsing',
                 progress: 10 + Math.min(70, (processedRows / (totalRows || processedRows)) * 70),
@@ -90,29 +110,41 @@ export class DataProcessor {
           }
         },
         complete: () => {
-          onProgress?.({
-            stage: 'validating',
-            progress: 85,
-            current: results.length,
-            total: results.length,
-            message: 'Validating processed data...'
-          });
+          try {
+            // Combine all chunks with current chunk
+            if (currentChunk.length > 0) {
+              chunks.push(currentChunk);
+            }
+            
+            // Flatten all chunks into results array
+            const allResults = chunks.flat();
+            
+            onProgress?.({
+              stage: 'validating',
+              progress: 85,
+              current: allResults.length,
+              total: allResults.length,
+              message: 'Validating processed data...'
+            });
 
-          // Final validation
-          const validResults = skipValidation ? results : this.validateDataPoints(results);
-          
-          onProgress?.({
-            stage: 'complete',
-            progress: 100,
-            current: validResults.length,
-            total: validResults.length,
-            message: `Successfully loaded ${validResults.length} items`
-          });
+            // Final validation
+            const validResults = skipValidation ? allResults : this.validateDataPoints(allResults);
+            
+            onProgress?.({
+              stage: 'complete',
+              progress: 100,
+              current: validResults.length,
+              total: validResults.length,
+              message: `Successfully loaded ${validResults.length} items`
+            });
 
-          const processingTime = Date.now() - startTime;
-          console.log(`CSV processing completed in ${processingTime}ms: ${validResults.length} items`);
-          
-          resolve(validResults);
+            const processingTime = Date.now() - startTime;
+            console.log(`CSV processing completed in ${processingTime}ms: ${validResults.length} items`);
+            
+            resolve(validResults);
+          } catch (error: any) {
+            reject(new Error(`Failed to process CSV data: ${error.message}`));
+          }
         },
         error: (error) => {
           reject(new Error(`CSV parsing failed: ${error.message}`));
